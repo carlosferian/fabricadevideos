@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 import json
-from utils import extract_text_from_pdf, generate_script, save_assets_dir, get_bgg_game_images, download_image, run_generate_audio, search_game_images_ddg, render_video
+from utils import extract_text_from_pdf, generate_script, save_assets_dir, get_bgg_game_images, download_image, run_generate_audio, search_game_images_ddg, render_video, save_script_to_file, load_script_from_file, extract_images_from_url, delete_game_assets
 
 # Page configuration
 st.set_page_config(
@@ -10,6 +10,48 @@ st.set_page_config(
     layout="wide"
 )
 
+# Custom CSS to increase font sizes for improved accessibility and legibility
+st.markdown("""
+<style>
+    /* Global font size increase */
+    html, body, [class*="css"], .stMarkdown, p, span, li, label, input, button, select, textarea {
+        font-size: 19px !important;
+    }
+    /* Larger headers */
+    h1 {
+        font-size: 38px !important;
+        font-weight: 700 !important;
+    }
+    h2 {
+        font-size: 28px !important;
+        font-weight: 600 !important;
+    }
+    h3 {
+        font-size: 23px !important;
+        font-weight: 500 !important;
+    }
+    /* Tab headers font size */
+    button[data-baseweb="tab"] p {
+        font-size: 20px !important;
+        font-weight: 600 !important;
+    }
+    /* Inputs, textareas and selectboxes */
+    .stTextInput input, .stTextArea textarea, .stSelectbox select, .stFileUploader label {
+        font-size: 18px !important;
+    }
+    /* Sidebar text increase */
+    [data-testid="stSidebar"] [class*="css"], [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {
+        font-size: 18px !important;
+    }
+    /* Action buttons */
+    .stButton button {
+        font-size: 19px !important;
+        padding: 8px 16px !important;
+        border-radius: 8px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Initialize session state for script and game data
 if "script" not in st.session_state:
     st.session_state.script = None
@@ -17,10 +59,62 @@ if "game_path" not in st.session_state:
     st.session_state.game_path = None
 if "bgg_images" not in st.session_state:
     st.session_state.bgg_images = None
+if "game_name_val" not in st.session_state:
+    st.session_state.game_name_val = ""
+if "loaded_game_name" not in st.session_state:
+    st.session_state.loaded_game_name = None
+if "last_history_select" not in st.session_state:
+    st.session_state.last_history_select = ""
 
 # --- SIDEBAR (Configurações) ---
 st.sidebar.title("⚙️ Configurações")
-game_name = st.sidebar.text_input("Nome do Jogo", placeholder="Ex: Catan, Azul, Dixit...")
+
+# Histórico de jogos salvos em assets/
+existing_games = [""]
+if os.path.exists("assets"):
+    folders = sorted([f for f in os.listdir("assets") if os.path.isdir(os.path.join("assets", f))])
+    existing_games.extend(folders)
+
+selected_history = st.sidebar.selectbox(
+    "📂 Restaurar Jogo Existente",
+    options=existing_games,
+    index=0,
+    format_func=lambda x: "Selecione um jogo..." if x == "" else x.replace("_", " ").title(),
+    key="history_select"
+)
+
+# Atualizar o valor de busca/nome do jogo a partir da escolha do histórico (apenas quando houver mudança real de seleção)
+if st.session_state.history_select != st.session_state.last_history_select:
+    st.session_state.last_history_select = st.session_state.history_select
+    if st.session_state.history_select != "":
+        game_name_from_history = st.session_state.history_select.replace("_", " ").title()
+        st.session_state.game_name_val = game_name_from_history
+        st.session_state.game_name_input = game_name_from_history
+
+game_name = st.sidebar.text_input(
+    "Nome do Jogo", 
+    value=st.session_state.game_name_val,
+    placeholder="Ex: Catan, Azul, Dixit...",
+    key="game_name_input"
+)
+st.session_state.game_name_val = game_name
+
+# Carregar o script.json automaticamente na troca de jogo
+if game_name != st.session_state.loaded_game_name:
+    st.session_state.loaded_game_name = game_name
+    if game_name:
+        st.session_state.game_path = save_assets_dir(game_name)
+        loaded_script = load_script_from_file(game_name)
+        if loaded_script:
+            st.session_state.script = loaded_script
+            st.sidebar.info(f"📂 Roteiro de '{game_name}' carregado do histórico!")
+        else:
+            st.session_state.script = None
+            st.session_state.bgg_images = None
+    else:
+        st.session_state.script = None
+        st.session_state.bgg_images = None
+
 manual_file = st.sidebar.file_uploader("Upload do Manual (PDF)", type=["pdf"])
 video_level = st.sidebar.selectbox(
     "Nível do Vídeo",
@@ -48,29 +142,37 @@ tab1, tab2, tab3 = st.tabs([
 # --- TAB 1: ROTEIRO ---
 with tab1:
     st.header("1. Geração de Roteiro")
-    if not game_name or not manual_file:
-        st.warning("⚠️ Por favor, preencha o nome do jogo e faça o upload do manual na barra lateral.")
+    if not game_name or (not manual_file and not st.session_state.script):
+        st.warning("⚠️ Por favor, preencha o nome do jogo e faça o upload do manual na barra lateral para gerar um roteiro.")
     else:
-        st.info(f"Pronto para processar o jogo: **{game_name}**")
+        if st.session_state.script:
+            st.info(f"Roteiro carregado para o jogo: **{game_name}**")
+        else:
+            st.info(f"Pronto para processar o jogo: **{game_name}**")
         
         if st.button("Gerar Roteiro com IA"):
-            with st.spinner("Lendo manual e gerando roteiro..."):
-                temp_pdf_path = f"temp_{manual_file.name}"
-                with open(temp_pdf_path, "wb") as f:
-                    f.write(manual_file.getbuffer())
-                
-                text = extract_text_from_pdf(temp_pdf_path)
-                script = generate_script(game_name, text, video_level)
-                os.remove(temp_pdf_path)
-                
-                if isinstance(script, (list, dict)):
-                    if isinstance(script, dict) and "scenes" in script:
-                        st.session_state.script = script["scenes"]
+            if not manual_file:
+                st.error("Por favor, faça o upload de um arquivo manual em PDF para gerar o roteiro.")
+            else:
+                with st.spinner("Lendo manual e gerando roteiro..."):
+                    temp_pdf_path = f"temp_{manual_file.name}"
+                    with open(temp_pdf_path, "wb") as f:
+                        f.write(manual_file.getbuffer())
+                    
+                    text = extract_text_from_pdf(temp_pdf_path)
+                    script = generate_script(game_name, text, video_level)
+                    os.remove(temp_pdf_path)
+                    
+                    if isinstance(script, (list, dict)):
+                        if isinstance(script, dict) and "scenes" in script:
+                            st.session_state.script = script["scenes"]
+                        else:
+                            st.session_state.script = script
+                        if game_name:
+                            save_script_to_file(game_name, st.session_state.script)
+                        st.success("Roteiro gerado e persistido no histórico com sucesso!")
                     else:
-                        st.session_state.script = script
-                    st.success("Roteiro gerado com sucesso!")
-                else:
-                    st.error(f"Erro: {script}")
+                        st.error(f"Erro: {script}")
 
         if st.session_state.script:
             st.subheader("📝 Roteiro Editável")
@@ -102,7 +204,13 @@ with tab1:
                 
                 if st.button("Salvar Alterações no Roteiro"):
                     st.session_state.script = edited_script
-                    st.success("Alterações salvas!")
+                    if game_name:
+                        if save_script_to_file(game_name, edited_script):
+                            st.success("Alterações salvas e persistidas no histórico com sucesso!")
+                        else:
+                            st.warning("Alterações salvas em memória, mas houve um erro ao persistir no arquivo.")
+                    else:
+                        st.success("Alterações salvas com sucesso em memória!")
 
 # --- TAB 2: NARRAÇÃO & IMAGENS ---
 with tab2:
@@ -114,6 +222,17 @@ with tab2:
         if not game_name:
             st.warning("⚠️ Insira o nome do jogo na barra lateral para liberar as ferramentas de imagem.")
         else:
+            # Verificar se a imagem principal já existe
+            game_assets = save_assets_dir(game_name)
+            img_path = os.path.join(game_assets, "main_game.jpg")
+            image_exists = os.path.exists(img_path)
+            
+            if image_exists:
+                st.success("✅ Imagem Principal (main_game.jpg) já está disponível no disco!")
+                st.image(img_path, caption="Imagem do Jogo Atual", width=300)
+                st.markdown("---")
+                st.markdown("#### 🔄 Atualizar ou Buscar Nova Imagem")
+            
             search_query = st.text_input("Termo de Busca de Imagem (ajuste se necessário)", value=f"{game_name} board game")
             
             if st.button("Buscar Imagens na Web"):
@@ -126,20 +245,50 @@ with tab2:
                         st.error("Nenhuma imagem encontrada. Tente ajustar o termo de busca ou use a URL manual abaixo.")
             
             st.divider()
-            manual_url = st.text_input("Ou cole a URL direta de uma imagem real (fallback):")
-            if st.button("Usar URL Manual"):
-                if manual_url:
-                    st.session_state.bgg_images = {"main_image": manual_url}
-                    st.success("URL manual configurada!")
+            manual_url = st.text_input("Ou cole uma URL (Página Web para extrair imagens OU imagem direta):", placeholder="https://exemplo.com/pagina-do-jogo ou https://exemplo.com/imagem.jpg")
+            
+            col_url1, col_url2 = st.columns(2)
+            with col_url1:
+                if st.button("🔍 Extrair Imagens da Página", use_container_width=True):
+                    if manual_url:
+                        if manual_url.lower().startswith("http"):
+                            with st.spinner("Extraindo imagens da página..."):
+                                results = extract_images_from_url(manual_url)
+                                if results:
+                                    st.session_state.bgg_images = results
+                                    st.success(f"{len(results)} imagens extraídas com sucesso!")
+                                else:
+                                    st.error("Nenhuma imagem encontrada na página ou falha ao acessar a URL.")
+                        else:
+                            st.error("Por favor, digite uma URL válida começando com http:// ou https://")
+                    else:
+                        st.error("Por favor, insira uma URL.")
+                        
+            with col_url2:
+                if st.button("🖼️ Usar como Imagem Direta", use_container_width=True):
+                    if manual_url:
+                        if manual_url.lower().startswith("http"):
+                            st.session_state.bgg_images = {"main_image": manual_url}
+                            st.success("URL direta de imagem configurada! Veja a prévia abaixo.")
+                        else:
+                            st.error("Por favor, digite uma URL válida começando com http:// ou https://")
+                    else:
+                        st.error("Por favor, insira uma URL.")
             
             if st.session_state.bgg_images:
                 st.divider()
                 if isinstance(st.session_state.bgg_images, list):
                     st.write("🔍 **Resultados Encontrados:**")
-                    cols = st.columns(len(st.session_state.bgg_images))
-                    for idx, img_opt in enumerate(st.session_state.bgg_images):
-                        with cols[idx]:
-                            st.image(img_opt["thumbnail"], caption=f"Opção {idx + 1}", use_container_width=True)
+                    
+                    # Grade interativa de imagens em linhas de 5 colunas
+                    num_cols = 5
+                    for i in range(0, len(st.session_state.bgg_images), num_cols):
+                        chunk = st.session_state.bgg_images[i:i+num_cols]
+                        cols = st.columns(len(chunk))
+                        for idx, img_opt in enumerate(chunk):
+                            actual_idx = i + idx
+                            with cols[idx]:
+                                st.image(img_opt["thumbnail"], caption=f"Opção {actual_idx + 1}", use_container_width=True)
                     
                     selected_idx = st.selectbox(
                         "Escolha a melhor imagem para o vídeo:",
@@ -155,6 +304,7 @@ with tab2:
                             path = download_image(selected_img["main_image"], game_name, "main_game.jpg")
                             if path:
                                 st.success(f"Imagem salva com sucesso em: {path}")
+                                st.rerun()
                             else:
                                 st.error("Erro ao baixar a imagem. Tente outra opção da lista.")
                 else:
@@ -165,23 +315,40 @@ with tab2:
                             path = download_image(imgs["main_image"], game_name, "main_game.jpg")
                             if path:
                                 st.success(f"Imagem salva em: {path}")
+                                st.rerun()
                             else:
                                 st.error("Erro ao baixar a imagem de URL manual.")
             
     with col2:
         st.subheader("🎙️ Narração (TTS)")
         if not st.session_state.script:
-            st.warning("Gere o roteiro na Aba 1 primeiro.")
+            st.warning("⚠️ Gere ou restaure o roteiro na Aba 1 primeiro.")
         else:
-            if st.button("Gerar Áudios de Todas as Cenas"):
+            # Verificar status das narrações
+            game_assets = save_assets_dir(game_name)
+            missing_audios = []
+            for scene in st.session_state.script:
+                s_num = scene.get("scene", 0)
+                audio_path = os.path.join(game_assets, f"scene_{s_num}.mp3")
+                if not os.path.exists(audio_path):
+                    missing_audios.append(s_num)
+            
+            if not missing_audios:
+                st.success(f"✅ Todos os {len(st.session_state.script)} áudios das cenas já estão gerados no disco!")
+            elif len(missing_audios) < len(st.session_state.script):
+                st.warning(f"⚠️ {len(st.session_state.script) - len(missing_audios)} de {len(st.session_state.script)} áudios prontos. Cenas pendentes: {', '.join(map(str, missing_audios))}")
+            else:
+                st.info("ℹ️ Nenhum áudio foi gerado para este jogo ainda.")
+                
+            if st.button("Gerar/Regerar Áudios de Todas as Cenas"):
                 with st.spinner("Gerando narrações..."):
-                    game_assets = save_assets_dir(game_name)
                     for scene in st.session_state.script:
                         s_num = scene.get("scene", 0)
                         text = scene.get("narration", "")
                         audio_path = os.path.join(game_assets, f"scene_{s_num}.mp3")
                         run_generate_audio(text, audio_path)
-                    st.success(f"Áudios gerados em: {game_assets}")
+                    st.success(f"Áudios gerados com sucesso!")
+                    st.rerun()
             st.info("Os áudios serão usados na renderização final.")
 
 # --- TAB 3: ANIMAÇÃO & VÍDEO FINAL ---
@@ -260,6 +427,58 @@ with tab3:
                         mime="video/mp4",
                         use_container_width=True
                     )
+
+# --- SIDEBAR ATIVOS ---
+if game_name:
+    st.sidebar.markdown("---")
+    with st.sidebar.expander("🗑️ Limpeza de Ativos"):
+        st.write("Exclua arquivos indesejados deste jogo:")
+        
+        # Granular asset deletion
+        if st.button("🎙️ Excluir Áudios/Cenas", use_container_width=True):
+            if delete_game_assets(game_name, "audio"):
+                st.success("Áudios e cenas excluídos!")
+                st.rerun()
+            else:
+                st.info("Nenhum áudio para excluir.")
+                
+        if st.button("🖼️ Excluir Imagem Principal", use_container_width=True):
+            if delete_game_assets(game_name, "image"):
+                st.success("Imagem principal excluída!")
+                st.rerun()
+            else:
+                st.info("Nenhuma imagem para excluir.")
+                
+        if st.button("🎬 Excluir Vídeo Final", use_container_width=True):
+            if delete_game_assets(game_name, "video"):
+                st.success("Vídeo final excluído!")
+                st.rerun()
+            else:
+                st.info("Nenhum vídeo para excluir.")
+                
+        if st.button("📝 Excluir Roteiro (JSON)", use_container_width=True):
+            dest_dir = save_assets_dir(game_name)
+            script_path = os.path.join(dest_dir, "script.json")
+            if os.path.exists(script_path):
+                os.remove(script_path)
+                st.session_state.script = None
+                st.success("Roteiro excluído do disco!")
+                st.rerun()
+            else:
+                st.info("Nenhum roteiro salvo encontrado.")
+                
+        st.markdown("---")
+        # Extreme caution action
+        if st.button("🚨 Excluir Todo o Jogo", use_container_width=True, type="primary"):
+            if delete_game_assets(game_name, "all"):
+                st.success(f"Jogo '{game_name}' removido por completo!")
+                st.session_state.game_name_val = ""
+                st.session_state.loaded_game_name = None
+                st.session_state.script = None
+                st.session_state.bgg_images = None
+                st.rerun()
+            else:
+                st.error("Erro ao deletar diretório.")
 
 # Footer
 st.sidebar.markdown("---")

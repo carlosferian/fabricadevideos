@@ -543,3 +543,142 @@ def render_video(game_name, script):
                     os.remove(temp_f)
             except Exception as e:
                 print(f"Erro ao remover frame temporário {temp_f}: {e}")
+
+def save_script_to_file(game_name, script):
+    """Salva o JSON do roteiro na pasta de assets do jogo."""
+    if not game_name or not script:
+        return False
+    try:
+        dest_dir = save_assets_dir(game_name)
+        script_path = os.path.join(dest_dir, "script.json")
+        with open(script_path, "w", encoding="utf-8") as f:
+            json.dump(script, f, ensure_ascii=False, indent=4)
+        print(f"Roteiro salvo com sucesso em: {script_path}")
+        return True
+    except Exception as e:
+        print(f"Erro ao salvar roteiro em arquivo: {e}")
+        return False
+
+def load_script_from_file(game_name):
+    """Carrega o roteiro salvo na pasta de assets do jogo."""
+    if not game_name:
+        return None
+    try:
+        dest_dir = save_assets_dir(game_name)
+        script_path = os.path.join(dest_dir, "script.json")
+        if os.path.exists(script_path):
+            with open(script_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return None
+    except Exception as e:
+        print(f"Erro ao carregar roteiro do arquivo: {e}")
+        return None
+
+def extract_images_from_url(url):
+    """Extrai imagens de uma página da web usando expressões regulares."""
+    import requests
+    import re
+    from urllib.parse import urljoin
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    # Se for uma imagem direta (pela extensão da URL), retorna ela mesma
+    url_clean = url.split("?")[0].lower()
+    if url_clean.endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+        return [{
+            "title": "Imagem Direta URL",
+            "main_image": url,
+            "thumbnail": url
+        }]
+        
+    results = []
+    try:
+        # Tenta verificar se é uma imagem direta pelo Content-Type antes de baixar toda a página
+        try:
+            head = requests.head(url, headers=headers, timeout=5)
+            if head.status_code == 200 and "image/" in head.headers.get("Content-Type", "").lower():
+                return [{
+                    "title": "Imagem Direta URL",
+                    "main_image": url,
+                    "thumbnail": url
+                }]
+        except Exception:
+            pass
+
+        response = requests.get(url, headers=headers, timeout=12)
+        if response.status_code == 200:
+            # Verifica se a resposta em si é uma imagem (caso o HEAD não tenha funcionado)
+            if "image/" in response.headers.get("Content-Type", "").lower():
+                return [{
+                    "title": "Imagem Direta URL",
+                    "main_image": url,
+                    "thumbnail": url
+                }]
+
+            # Encontra tags <img src="..."> usando regex
+            img_tags = re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', response.text, re.IGNORECASE)
+            
+            seen_urls = set()
+            for src in img_tags:
+                abs_url = urljoin(url, src)
+                if abs_url not in seen_urls:
+                    # Filtra pixels e ícones insignificantes
+                    if not any(x in abs_url.lower() for x in ["tracker", "pixel", "analytics", ".svg", "sprite", "logo-"]):
+                        if abs_url.lower().startswith("http"):
+                            seen_urls.add(abs_url)
+                            results.append({
+                                "title": "Imagem Extraída da Página",
+                                "main_image": abs_url,
+                                "thumbnail": abs_url
+                            })
+                            if len(results) >= 10:  # Limita a 10 imagens
+                                break
+    except Exception as e:
+        print(f"Erro ao extrair imagens de {url}: {e}")
+    return results
+
+def delete_game_assets(game_name, delete_type):
+    """Exclui de forma granular ou total os arquivos gerados de um jogo."""
+    import shutil
+    if not game_name:
+        return False
+    try:
+        dest_dir = save_assets_dir(game_name)
+        if delete_type == "all":
+            # Deleta toda a pasta do jogo
+            if os.path.exists(dest_dir):
+                shutil.rmtree(dest_dir)
+                print(f"Diretório deletado com sucesso: {dest_dir}")
+                return True
+        elif delete_type == "video":
+            # Deleta apenas o vídeo final
+            video_path = os.path.join(dest_dir, "video_final.mp4")
+            if os.path.exists(video_path):
+                os.remove(video_path)
+                print("Vídeo excluído com sucesso.")
+                return True
+        elif delete_type == "image":
+            # Deleta apenas a imagem principal do jogo
+            img_path = os.path.join(dest_dir, "main_game.jpg")
+            if os.path.exists(img_path):
+                os.remove(img_path)
+                print("Imagem principal excluída com sucesso.")
+                return True
+        elif delete_type == "audio":
+            # Deleta todas as narrações em áudio e frames temporários
+            files = os.listdir(dest_dir)
+            deleted_count = 0
+            for f in files:
+                if f.startswith("scene_") and f.endswith(".mp3"):
+                    os.remove(os.path.join(dest_dir, f))
+                    deleted_count += 1
+                elif f.startswith("temp_frame_") and f.endswith(".jpg"):
+                    os.remove(os.path.join(dest_dir, f))
+                    deleted_count += 1
+            print(f"Excluídos {deleted_count} arquivos de áudios/cenas.")
+            return True
+    except Exception as e:
+        print(f"Erro ao deletar ativos de tipo '{delete_type}' para o jogo '{game_name}': {e}")
+    return False

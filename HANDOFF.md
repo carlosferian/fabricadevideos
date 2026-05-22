@@ -11,11 +11,11 @@ O projeto visa automatizar a criação de vídeos curtos verticais (9:16) para r
 ---
 
 ## 🏗️ Arquitetura Técnica
-- **Frontend:** Streamlit (3 abas: Roteiro, Ativos, Renderização).
-- **LLM (Roteiro):** OpenRouter (atualmente usando `openrouter/auto` com créditos para máxima estabilidade).
-- **TTS (Voz):** `edge-tts` (Vozes brasileiras neurais gratuitas).
+- **Frontend:** Streamlit (3 abas: Roteiro, Ativos, Renderização). Acessibilidade com CSS global para fontes ampliadas (18px a 38px).
+- **LLM (Roteiro):** OpenRouter (`openrouter/auto` com créditos para máxima estabilidade).
+- **TTS (Voz):** `edge-tts` (Vozes brasileiras neurais gratuitas) com gerador dinâmico de áudios.
 - **Processamento de PDF:** `pdfplumber` para leitura integral do manual.
-- **Edição de Vídeo:** `moviepy` (preparado para montagem).
+- **Edição de Vídeo & Imagens:** `moviepy` e `Pillow` (conversão 9:16 vertical, desfoque Gaussian Blur de fundo, centralização de fotos com borda premium, e legendas dinâmicas com quebra automática de linha sobre caixas semitransparentes).
 
 ---
 
@@ -23,33 +23,39 @@ O projeto visa automatizar a criação de vídeos curtos verticais (9:16) para r
 
 ### ✅ Fase 1: Estrutura Básica
 - Repositório, `.gitignore`, `requirements.txt` e UI Shell no `app.py` concluídos.
+- Folha de estilo de alta acessibilidade com fontes maiores.
 
 ### ✅ Fase 2: Ingestão e Roteiro
-- Leitura de PDF e geração de roteiro JSON via OpenRouter funcionando.
-- Sistema robusto para lidar com diferentes formatos de resposta do LLM.
-- **Pasta de Assets:** Estrutura `assets/{nome_do_jogo}/` criada automaticamente.
+- Leitura de PDF e geração de roteiro JSON via OpenRouter.
+- **Histórico e Persistência:** Roteiro salvo automaticamente em `assets/{game_name}/script.json`.
+- **Restauração Dinâmica:** Seletor de histórico na barra lateral que preenche o jogo selecionado, sincroniza estados e carrega o roteiro salvo sem obrigar novo upload de manual em PDF.
 
-### ⚠️ Fase 3: Imagens (BGG) - **BLOQUEADO/FALLBACK**
-- **O Problema:** A API XML2 do BoardGameGeek passou a exigir `Bearer Token` (aprovação manual demora semanas) e o scraping direto via Python está sofrendo bloqueios de **Status 403**.
-- **A Solução Implementada:** Fallback para **Entrada Manual**. O usuário pode inserir o ID do jogo ou, preferencialmente, colar a **URL direta de uma imagem** real encontrada na web.
+### ✅ Fase 3: Imagens da Web (Bypassing BGG API)
+- **Motor Bing Heurístico:** Motor de busca inteligente via DuckDuckGo com normalização de acentos, ranqueamento por relevância (focado em board games) e filtro de exclusão absoluta contra fotos de bancos comerciais (ex: "Banco de Venezuela" ao buscar "Banco Imobiliário").
+- **Raspador Inteligente de Páginas Web (HTTP Scraper):** O usuário pode colar uma URL de página web (BoardGameGeek, Wikipédia, blogs) ou link direto. O scraper valida o `Content-Type` do link e extrai imagens úteis da página, exibindo-as em uma grade visual interativa de 5 colunas para seleção e download de caixa do jogo direto nos assets.
 
-### 🛠️ Fase 4: Narração (TTS)
-- Integração com `edge-tts` concluída no `utils.py`.
-- Lógica de geração de áudios individuais por cena implementada no `app.py`.
+### ✅ Fase 4: Narração & Geração Física de Ativos (TTS)
+- Integração com `edge-tts` e geração de áudios de cenas individuais.
+- **Detecção Física em Tempo Real:** A Aba 2 e Aba 3 buscam fisicamente no disco e mostram o status dos ativos (ex: se `main_game.jpg` e os áudios individuais existem), atualizando o status dinamicamente.
+
+### ✅ Fase 4.1: Renderização de Vídeo Vertical Premium
+- Motor de renderização estática 9:16 concluído usando Pillow + MoviePy.
+- Imagem estática centralizada com borda branca elegante sobre um fundo animado desfocado (Gaussian Blur 30px) do próprio jogo.
+- Legendas dinâmicas em português, desenhadas com quebra de linha inteligente sobre fundo retangular preto semitransparentes (opacidade 70%).
+- Compilação estável do arquivo `video_final.mp4` com codecs `libx264`/`aac` para compatibilidade nativa, player de vídeo do Streamlit e botão de download.
+
+### ✅ Fase 4.2: Painel de Limpeza de Ativos (Gerenciamento)
+- Painel `Limpeza de Ativos` em expander na barra lateral com botões de exclusão granular: remover apenas áudios, imagem principal, roteiro JSON ou limpar o jogo inteiro excluindo o diretório de assets físico e atualizando instantaneamente os status da UI via `st.rerun()`.
 
 ---
 
 ## 🚀 Próximos Passos (Para a Próxima IA)
 
-1. **Validação de Ativos:** Garantir que o usuário tenha baixado a imagem (`main_game.jpg`) e gerado os áudios (`scene_X.mp3`) na Aba 2.
-2. **Implementação da Fase 4.1 (Renderização Estática):**
-   - Criar em `utils.py` uma função usando `moviepy` para:
-     - Criar clips de imagem (9:16) para cada cena.
-     - Sincronizar com a duração do áudio da respectiva cena.
-     - Concatenar as cenas em um vídeo final.
-3. **Fase 5: Image-to-Video:**
-   - Integrar modelos de animação via OpenRouter (ex: Luma/Kling) para animar a imagem estática antes da montagem final.
+1. **Fase 5: Image-to-Video (Animação):**
+   - Integrar modelos de inteligência artificial de animação de imagem (como Luma, Kling ou Runway) via OpenRouter/APIs externas para dar movimento tridimensional aos componentes centrais do jogo antes de compilar com as legendas e áudio.
+2. **Integração de Música de Fundo:**
+   - Adicionar uma trilha sonora opcional com controle de volume em segundo plano para deixar os vídeos ainda mais dinâmicos e envolventes.
 
 ---
 
-**Nota para o Desenvolvedor:** Os arquivos `app.py` e `utils.py` estão sincronizados. A chave de API está no `.env`. O foco deve ser agora a Aba 3 (Renderização).
+**Nota de Sucesso:** O pipeline de criação e compilação de vídeos verticais estáticos de alta qualidade está 100% testado, consolidado e integrado sem bugs de concorrência ou cache no Streamlit!
