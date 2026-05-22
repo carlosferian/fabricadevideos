@@ -1,0 +1,11 @@
+streamlit
+openrouter
+requests
+edge-tts
+moviepy
+pypdf2
+pdfplumber
+python-dotenv
+pillow
+xmltodict
+duckduckgo_search
