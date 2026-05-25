@@ -233,47 +233,78 @@ with tab2:
                 st.markdown("---")
                 st.markdown("#### 🔄 Atualizar ou Buscar Nova Imagem")
             
-            search_query = st.text_input("Termo de Busca de Imagem (ajuste se necessário)", value=f"{game_name} board game")
+            inner_tab1, inner_tab2, inner_tab3 = st.tabs([
+                "🔍 Busca Web DDG", 
+                "🎲 API Oficial BGG", 
+                "🔗 URL Manual/Scraper"
+            ])
             
-            if st.button("Buscar Imagens na Web"):
-                with st.spinner("Buscando imagens reais na web..."):
-                    results = search_game_images_ddg(search_query, max_results=5)
-                    if results:
-                        st.session_state.bgg_images = results
-                        st.success(f"{len(results)} imagens encontradas!")
-                    else:
-                        st.error("Nenhuma imagem encontrada. Tente ajustar o termo de busca ou use a URL manual abaixo.")
-            
-            st.divider()
-            manual_url = st.text_input("Ou cole uma URL (Página Web para extrair imagens OU imagem direta):", placeholder="https://exemplo.com/pagina-do-jogo ou https://exemplo.com/imagem.jpg")
-            
-            col_url1, col_url2 = st.columns(2)
-            with col_url1:
-                if st.button("🔍 Extrair Imagens da Página", use_container_width=True):
-                    if manual_url:
-                        if manual_url.lower().startswith("http"):
-                            with st.spinner("Extraindo imagens da página..."):
-                                results = extract_images_from_url(manual_url)
-                                if results:
-                                    st.session_state.bgg_images = results
-                                    st.success(f"{len(results)} imagens extraídas com sucesso!")
-                                else:
-                                    st.error("Nenhuma imagem encontrada na página ou falha ao acessar a URL.")
+            with inner_tab1:
+                st.write("Busque imagens de componentes e tabuleiros na web:")
+                search_query = st.text_input("Termo de Busca de Imagem (ajuste se necessário)", value=f"{game_name} board game", key="ddg_search_input")
+                if st.button("Buscar Imagens na Web", key="ddg_search_btn"):
+                    with st.spinner("Buscando imagens reais na web..."):
+                        results = search_game_images_ddg(search_query, max_results=5)
+                        if results:
+                            st.session_state.bgg_images = results
+                            st.success(f"{len(results)} imagens encontradas!")
                         else:
-                            st.error("Por favor, digite uma URL válida começando com http:// ou https://")
+                            st.error("Nenhuma imagem encontrada. Tente ajustar o termo de busca ou use a API oficial do BGG.")
+                            
+            with inner_tab2:
+                st.write("Busque a imagem oficial de alta definição direto da base de dados do BGG:")
+                bgg_input = st.text_input("Link do Jogo ou ID numérico do BGG", placeholder="Ex: 13 ou https://boardgamegeek.com/boardgame/13/catan", key="bgg_search_input")
+                if st.button("Buscar Imagem Oficial no BGG", key="bgg_search_btn"):
+                    if bgg_input:
+                        with st.spinner("Buscando dados na API do BGG..."):
+                            from utils import get_bgg_game_images
+                            results = get_bgg_game_images(bgg_input)
+                            if results:
+                                st.session_state.bgg_images = [{
+                                    "title": f"Imagem Oficial do BGG (ID: {bgg_input})",
+                                    "main_image": results["main_image"],
+                                    "thumbnail": results["thumbnail"]
+                                }]
+                                st.success("Imagem oficial do BGG encontrada com sucesso!")
+                            else:
+                                st.error("Não foi possível encontrar imagens para o ID/link no BGG. Verifique e tente novamente.")
                     else:
-                        st.error("Por favor, insira uma URL.")
+                        st.error("Por favor, digite o Link ou ID do jogo no BGG.")
                         
-            with col_url2:
-                if st.button("🖼️ Usar como Imagem Direta", use_container_width=True):
-                    if manual_url:
-                        if manual_url.lower().startswith("http"):
-                            st.session_state.bgg_images = {"main_image": manual_url}
-                            st.success("URL direta de imagem configurada! Veja a prévia abaixo.")
+            with inner_tab3:
+                st.write("Extraia imagens de blogs/sites ou configure uma imagem direta por link:")
+                manual_url = st.text_input("Cole a URL da página web ou link direto da imagem:", placeholder="https://exemplo.com/pagina-ou-imagem.jpg", key="manual_url_input")
+                col_url1, col_url2 = st.columns(2)
+                with col_url1:
+                    if st.button("🔍 Extrair Imagens da Página", use_container_width=True, key="manual_scrape_btn"):
+                        if manual_url:
+                            if manual_url.lower().startswith("http"):
+                                with st.spinner("Extraindo imagens da página..."):
+                                    results = extract_images_from_url(manual_url)
+                                    if results:
+                                        st.session_state.bgg_images = results
+                                        st.success(f"{len(results)} imagens extraídas com sucesso!")
+                                    else:
+                                        st.error("Nenhuma imagem encontrada na página ou falha ao acessar a URL.")
+                            else:
+                                st.error("Por favor, digite uma URL válida começando com http:// ou https://")
                         else:
-                            st.error("Por favor, digite uma URL válida começando com http:// ou https://")
-                    else:
-                        st.error("Por favor, insira uma URL.")
+                            st.error("Por favor, insira uma URL.")
+                            
+                with col_url2:
+                    if st.button("🖼️ Usar como Imagem Direta", use_container_width=True, key="manual_direct_btn"):
+                        if manual_url:
+                            if manual_url.lower().startswith("http"):
+                                st.session_state.bgg_images = [{
+                                    "title": "URL Direta de Imagem",
+                                    "main_image": manual_url,
+                                    "thumbnail": manual_url
+                                }]
+                                st.success("URL direta de imagem configurada! Veja a prévia abaixo.")
+                            else:
+                                st.error("Por favor, digite uma URL válida começando com http:// ou https://")
+                        else:
+                            st.error("Por favor, insira uma URL.")
             
             if st.session_state.bgg_images:
                 st.divider()
@@ -341,13 +372,20 @@ with tab2:
                 st.info("ℹ️ Nenhum áudio foi gerado para este jogo ainda.")
                 
             if st.button("Gerar/Regerar Áudios de Todas as Cenas"):
-                with st.spinner("Gerando narrações..."):
+                with st.spinner("Gerando narrações em paralelo..."):
+                    tasks = []
                     for scene in st.session_state.script:
                         s_num = scene.get("scene", 0)
                         text = scene.get("narration", "")
                         audio_path = os.path.join(game_assets, f"scene_{s_num}.mp3")
-                        run_generate_audio(text, audio_path)
-                    st.success(f"Áudios gerados com sucesso!")
+                        tasks.append((text, audio_path, "pt-BR-FranciscaNeural"))
+                    
+                    from utils import run_generate_multiple_audios
+                    success = run_generate_multiple_audios(tasks)
+                    if success:
+                        st.success(f"Todos os {len(st.session_state.script)} áudios foram gerados em paralelo com sucesso!")
+                    else:
+                        st.error("Ocorreu um erro ao gerar os áudios das cenas em paralelo.")
                     st.rerun()
             st.info("Os áudios serão usados na renderização final.")
 
@@ -397,6 +435,52 @@ with tab3:
             st.write("*(A integração Image-to-Video será implementada na Fase 5)*")
             
         st.divider()
+        st.subheader("🎬 Configurações de Renderização")
+        
+        col_style, col_music = st.columns(2)
+        
+        with col_style:
+            visual_style = st.selectbox(
+                "🎨 Estilo Visual do Vídeo",
+                ["Clássico", "Gradiente Moderno", "Neon Dark"],
+                index=0,
+                help="Define o layout visual, borda e fundo do vídeo vertical."
+            )
+            
+        with col_music:
+            bg_music_options = ["Sem Música", "Aleatória"]
+            bg_music_dir = os.path.join("assets", "bg_music")
+            
+            # Garante que a pasta existe e baixa se necessário para mostrar na lista
+            from utils import ensure_default_bg_music
+            ensure_default_bg_music()
+            
+            if os.path.exists(bg_music_dir):
+                mp3_files = sorted([f for f in os.listdir(bg_music_dir) if f.endswith(".mp3")])
+                bg_music_options.extend(mp3_files)
+                
+            bg_music_name = st.selectbox(
+                "🎵 Música de Fundo (BGM)",
+                options=bg_music_options,
+                index=0,
+                format_func=lambda x: x.replace(".mp3", "").replace("_", " ").title() if x not in ["Sem Música", "Aleatória"] else x,
+                help="Selecione a trilha sonora de fundo livre de direitos autorais."
+            )
+        
+        bg_volume = 0.15
+        if bg_music_name != "Sem Música":
+            bg_volume_percent = st.slider(
+                "🔊 Volume da Música de Fundo",
+                min_value=0,
+                max_value=50,
+                value=15,
+                step=5,
+                format="%d%%",
+                help="Recomendado manter entre 10% e 20% para não sobrepor a narração."
+            )
+            bg_volume = bg_volume_percent / 100.0
+            
+        st.divider()
         st.subheader("🎬 Exportar MP4")
         
         if not image_exists or missing_audios:
@@ -409,7 +493,13 @@ with tab3:
             
             if st.button("Renderizar Vídeo Vertical (9:16)"):
                 with st.spinner("Renderizando vídeo vertical premium com MoviePy e Pillow... Isso pode levar de 15 a 30 segundos."):
-                    video_path = render_video(game_name, st.session_state.script)
+                    video_path = render_video(
+                        game_name, 
+                        st.session_state.script, 
+                        visual_style=visual_style, 
+                        bg_music_name=bg_music_name, 
+                        bg_volume=bg_volume
+                    )
                     if video_path and os.path.exists(video_path):
                         st.success("✨ Vídeo renderizado com sucesso!")
                     else:

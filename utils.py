@@ -189,6 +189,38 @@ def run_generate_audio(text, output_path, voice="pt-BR-FranciscaNeural"):
         print(f"Erro ao gerar áudio: {e}")
         return None
 
+async def generate_multiple_audios(tasks_list):
+    """
+    Gera múltiplos áudios em paralelo usando edge-tts.
+    tasks_list deve ser uma lista de tuplas/dicionários contendo (text, output_path, voice).
+    """
+    async_tasks = []
+    for item in tasks_list:
+        if isinstance(item, dict):
+            text = item.get("text")
+            path = item.get("path")
+            voice = item.get("voice", "pt-BR-FranciscaNeural")
+        else:
+            text, path, voice = item
+        communicate = edge_tts.Communicate(text, voice)
+        async_tasks.append(communicate.save(path))
+    await asyncio.gather(*async_tasks)
+    return True
+
+def run_generate_multiple_audios(tasks_list):
+    """
+    Wrapper síncrono e thread-safe para gerar múltiplos áudios em paralelo,
+    evitando conflitos com loops de eventos ativos no Streamlit.
+    """
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor() as executor:
+            future = executor.submit(asyncio.run, generate_multiple_audios(tasks_list))
+            return future.result()
+    except Exception as e:
+        print(f"Erro ao gerar áudios em lote paralelo: {e}")
+        return False
+
 def search_game_images_ddg(query, max_results=5):
     """
     Busca imagens na web (via Bing Image Search) de forma extremamente robusta e inteligente,
@@ -363,10 +395,77 @@ def wrap_text(text, font, max_width, draw):
         lines.append(" ".join(current_line))
     return lines
 
-def create_scene_frame(image_path, text, scene_num, game_name, width=1080, height=1920):
+def ensure_default_bg_music():
+    """Garante que existam trilhas sonoras padrões na pasta assets/bg_music/."""
+    bg_music_dir = os.path.join("assets", "bg_music")
+    os.makedirs(bg_music_dir, exist_ok=True)
+    
+    tracks = {
+        "synth_pulse.mp3": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+        "retro_groove.mp3": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+        "chill_wave.mp3": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"
+    }
+    
+    downloaded = []
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    for filename, url in tracks.items():
+        path = os.path.join(bg_music_dir, filename)
+        if not os.path.exists(path):
+            try:
+                print(f"BGM: Baixando {filename} de {url}...")
+                response = requests.get(url, headers=headers, timeout=30)
+                if response.status_code == 200:
+                    with open(path, "wb") as f:
+                        f.write(response.content)
+                    print(f"BGM: {filename} salvo com sucesso.")
+                    downloaded.append(filename)
+                else:
+                    print(f"BGM: Falha ao baixar {filename} (Status {response.status_code})")
+            except Exception as e:
+                print(f"BGM: Erro ao baixar {filename}: {e}")
+    return downloaded
+
+def get_dominant_colors(image, num_colors=2):
+    """Retorna as duas cores predominantes da imagem."""
+    try:
+        img_temp = image.copy()
+        img_temp.thumbnail((100, 100))
+        quantized = img_temp.quantize(colors=num_colors).convert("RGB")
+        palette = quantized.getpalette()
+        c1 = (palette[0], palette[1], palette[2])
+        c2 = (palette[3], palette[4], palette[5])
+        return c1, c2
+    except Exception as e:
+        print(f"Erro ao obter cores predominantes: {e}")
+        return (30, 30, 45), (15, 15, 20)
+
+def create_linear_gradient(color1, color2, width=1080, height=1920):
+    """Cria uma imagem de gradiente linear de cima para baixo."""
+    base = Image.new("RGB", (width, height), color1)
+    top = Image.new("RGB", (width, height), color2)
+    mask = Image.new("L", (width, height))
+    mask_data = []
+    for y in range(height):
+        factor = int((y / height) * 255)
+        mask_data.extend([factor] * width)
+    mask.putdata(mask_data)
+    return Image.composite(top, base, mask)
+
+def round_corners(image, radius=30):
+    """Adiciona cantos arredondados a uma imagem Pillow."""
+    mask = Image.new("L", image.size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rounded_rectangle([0, 0, image.size[0], image.size[1]], radius=radius, fill=255)
+    result = Image.new("RGBA", image.size)
+    result.paste(image, (0, 0), mask=mask)
+    return result
+
+def create_scene_frame(image_path, text, scene_num, game_name, width=1080, height=1920, visual_style="Clássico"):
     """
-    Cria um frame de vídeo vertical (9:16) com fundo desfocado, imagem original centralizada
-    com borda branca, e a legenda estilizada na parte inferior.
+    Cria um frame de vídeo vertical (9:16) com o estilo visual configurado,
+    imagem original centralizada e legenda formatada.
     Retorna o caminho temporário da imagem salva.
     """
     try:
@@ -377,10 +476,11 @@ def create_scene_frame(image_path, text, scene_num, game_name, width=1080, heigh
         im = Image.new("RGB", (800, 600), color="gray")
         im_w, im_h = im.size
 
-    # 1. Criar fundo 9:16 desfocado
+    # --- 1. CONFIGURAÇÃO DE BACKGROUND SEGUNDO O ESTILO ---
     bg_ratio = width / height
     im_ratio = im_w / im_h
     
+    # Gerar a imagem base escalada
     if im_ratio > bg_ratio:
         # Imagem horizontal
         new_h = height
@@ -395,10 +495,24 @@ def create_scene_frame(image_path, text, scene_num, game_name, width=1080, heigh
         im_scaled = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
         top = (new_h - height) // 2
         bg = im_scaled.crop((0, top, width, top + height))
-        
-    bg = bg.filter(ImageFilter.GaussianBlur(radius=30))
-    
-    # 2. Centralizar imagem com borda branca
+
+    # Aplicar o estilo visual selecionado
+    if visual_style == "Gradiente Moderno":
+        # Extrair cores dominantes e criar um gradiente de fundo
+        color1, color2 = get_dominant_colors(im, num_colors=2)
+        # Atenuar as cores do gradiente para não ficarem gritantes
+        color1 = tuple(int(x * 0.6) for x in color1)
+        color2 = tuple(int(x * 0.3) for x in color2)
+        bg = create_linear_gradient(color1, color2, width, height)
+    elif visual_style == "Neon Dark":
+        # Fundo desfocado extra escuro (Dark Cyberpunk)
+        bg = bg.filter(ImageFilter.GaussianBlur(radius=50))
+        darken = Image.new("RGBA", (width, height), (0, 0, 0, 160)) # 62% escurecimento
+        bg = Image.composite(darken, bg.convert("RGBA"), darken.split()[3]).convert("RGB")
+    else: # "Clássico"
+        bg = bg.filter(ImageFilter.GaussianBlur(radius=30))
+
+    # --- 2. CENTRALIZAR IMAGEM PRINCIPAL ---
     max_w = width - 120  # 960px de largura máxima
     scale_factor = max_w / im_w
     center_w = max_w
@@ -415,12 +529,49 @@ def create_scene_frame(image_path, text, scene_num, game_name, width=1080, heigh
     
     center_im = im.resize((center_w, center_h), Image.Resampling.LANCZOS)
     
-    border_width = 4
-    bordered_im = Image.new("RGB", (center_w + 2*border_width, center_h + 2*border_width), color="white")
-    bordered_im.paste(center_im, (border_width, border_width))
-    bg.paste(bordered_im, (center_x - border_width, center_y - border_width))
-    
-    # 3. Legendas
+    if visual_style == "Gradiente Moderno":
+        # Desenhar uma borda branca arredondada
+        border_pad = 6
+        draw_bg = ImageDraw.Draw(bg)
+        draw_bg.rounded_rectangle(
+            [center_x - border_pad, center_y - border_pad, center_x + center_w + border_pad, center_y + center_h + border_pad],
+            radius=35 + border_pad,
+            fill="white"
+        )
+        # Centralizar imagem com cantos arredondados
+        rounded_im = round_corners(center_im, radius=35)
+        bg.paste(rounded_im, (center_x, center_y), mask=rounded_im)
+        
+    elif visual_style == "Neon Dark":
+        # Selecionar cor neon baseada no número da cena
+        neon_colors = ["#ff007f", "#00f0ff", "#39ff14", "#ffb300"]
+        neon_color = neon_colors[scene_num % len(neon_colors)]
+        
+        # Desenhar borda neon
+        border_pad = 6
+        draw_bg = ImageDraw.Draw(bg)
+        draw_bg.rounded_rectangle(
+            [center_x - border_pad, center_y - border_pad, center_x + center_w + border_pad, center_y + center_h + border_pad],
+            radius=30 + border_pad,
+            fill=neon_color
+        )
+        # Borda interna preta de isolamento
+        draw_bg.rounded_rectangle(
+            [center_x - 2, center_y - 2, center_x + center_w + 2, center_y + center_h + 2],
+            radius=30 + 2,
+            fill="black"
+        )
+        # Colar a imagem com cantos arredondados
+        rounded_im = round_corners(center_im, radius=30)
+        bg.paste(rounded_im, (center_x, center_y), mask=rounded_im)
+        
+    else: # "Clássico"
+        border_width = 4
+        bordered_im = Image.new("RGB", (center_w + 2*border_width, center_h + 2*border_width), color="white")
+        bordered_im.paste(center_im, (border_width, border_width))
+        bg.paste(bordered_im, (center_x - border_width, center_y - border_width))
+
+    # --- 3. LEGENDAS ---
     draw = ImageDraw.Draw(bg)
     
     font = None
@@ -453,11 +604,32 @@ def create_scene_frame(image_path, text, scene_num, game_name, width=1080, heigh
     
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     overlay_draw = ImageDraw.Draw(overlay)
-    overlay_draw.rounded_rectangle(
-        [box_x, box_y, box_x + box_w, box_y + box_h],
-        radius=15,
-        fill=(0, 0, 0, 180)
-    )
+    
+    if visual_style == "Neon Dark":
+        neon_colors = ["#ff007f", "#00f0ff", "#39ff14", "#ffb300"]
+        neon_color = neon_colors[scene_num % len(neon_colors)]
+        
+        # Caixa de legenda translúcida escura com outline neon brilhante
+        overlay_draw.rounded_rectangle(
+            [box_x, box_y, box_x + box_w, box_y + box_h],
+            radius=15,
+            fill=(10, 10, 15, 210), # Preto translúcido denso
+            outline=neon_color,
+            width=3
+        )
+    elif visual_style == "Gradiente Moderno":
+        # Caixa cinza escura suave e translúcida
+        overlay_draw.rounded_rectangle(
+            [box_x, box_y, box_x + box_w, box_y + box_h],
+            radius=15,
+            fill=(15, 15, 22, 190)
+        )
+    else: # "Clássico"
+        overlay_draw.rounded_rectangle(
+            [box_x, box_y, box_x + box_w, box_y + box_h],
+            radius=15,
+            fill=(0, 0, 0, 180)
+        )
     
     bg = Image.alpha_composite(bg.convert("RGBA"), overlay)
     draw_final = ImageDraw.Draw(bg)
@@ -475,12 +647,16 @@ def create_scene_frame(image_path, text, scene_num, game_name, width=1080, heigh
     bg.convert("RGB").save(temp_frame_path, "JPEG")
     return temp_frame_path
 
-def render_video(game_name, script):
+def render_video(game_name, script, visual_style="Clássico", bg_music_name="Sem Música", bg_volume=0.15):
     """
     Renderiza o vídeo final a partir da imagem do jogo e os áudios das cenas.
+    Permite mixar música de fundo (BGM) e aplicar estilos visuais diferenciados.
     Salva em assets/{game_name}/video_final.mp4.
     Retorna o caminho do vídeo gerado ou None se houver erro.
     """
+    # Garante que as músicas de fundo padrão estejam disponíveis
+    ensure_default_bg_music()
+    
     dest_dir = save_assets_dir(game_name)
     image_path = os.path.join(dest_dir, "main_game.jpg")
     
@@ -492,6 +668,7 @@ def render_video(game_name, script):
     temp_frames = []
     
     try:
+        # 1. Renderiza cada frame individualmente e carrega as locuções correspondentes
         for scene in script:
             scene_num = scene.get("scene", 0)
             narration = scene.get("narration", "")
@@ -504,7 +681,8 @@ def render_video(game_name, script):
             audio_clip = AudioFileClip(audio_path)
             duration = audio_clip.duration
             
-            temp_frame = create_scene_frame(image_path, narration, scene_num, game_name)
+            # Passa o estilo visual selecionado
+            temp_frame = create_scene_frame(image_path, narration, scene_num, game_name, visual_style=visual_style)
             temp_frames.append(temp_frame)
             
             image_clip = ImageClip(temp_frame).with_duration(duration).with_audio(audio_clip)
@@ -514,7 +692,50 @@ def render_video(game_name, script):
             print("Nenhuma cena válida pôde ser carregada para renderização.")
             return None
             
+        # 2. Concatena os clipes de imagem com áudio
         final_clip = concatenate_videoclips(scene_clips, method="compose")
+        
+        # 3. Adiciona a trilha de música de fundo (BGM) se configurada
+        bg_music_clip = None
+        if bg_music_name != "Sem Música":
+            bg_music_dir = os.path.join("assets", "bg_music")
+            bg_music_path = None
+            
+            if bg_music_name == "Aleatória":
+                if os.path.exists(bg_music_dir):
+                    mp3_files = [f for f in os.listdir(bg_music_dir) if f.endswith(".mp3")]
+                    if mp3_files:
+                        import random
+                        bg_music_path = os.path.join(bg_music_dir, random.choice(mp3_files))
+            else:
+                bg_music_path = os.path.join(bg_music_dir, bg_music_name)
+                
+            if bg_music_path and os.path.exists(bg_music_path):
+                try:
+                    from moviepy import CompositeAudioClip
+                    bg_music_clip = AudioFileClip(bg_music_path)
+                    
+                    # Corta ou repete a música para bater com a duração do vídeo
+                    if bg_music_clip.duration < final_clip.duration:
+                        n_repeats = int(final_clip.duration / bg_music_clip.duration) + 1
+                        bg_music_clip = concatenate_audioclips([bg_music_clip] * n_repeats).subclipped(0, final_clip.duration)
+                    else:
+                        bg_music_clip = bg_music_clip.subclipped(0, final_clip.duration)
+                        
+                    # Ajusta o volume da música de fundo
+                    bg_music_clip = bg_music_clip.with_volume_scaled(bg_volume)
+                    
+                    # Mescla a narração (áudio do vídeo) com o BGM
+                    original_audio = final_clip.audio
+                    combined_audio = CompositeAudioClip([original_audio, bg_music_clip])
+                    final_clip = final_clip.with_audio(combined_audio)
+                    print(f"BGM: Música '{os.path.basename(bg_music_path)}' mesclada com sucesso (volume: {bg_volume}).")
+                except Exception as audio_err:
+                    print(f"Erro ao adicionar música de fundo: {audio_err}")
+            else:
+                print(f"BGM: Arquivo '{bg_music_name}' não encontrado em {bg_music_dir}.")
+
+        # 4. Grava o arquivo de vídeo final
         output_video_path = os.path.join(dest_dir, "video_final.mp4")
         
         final_clip.write_videofile(
@@ -526,8 +747,11 @@ def render_video(game_name, script):
             remove_temp=True
         )
         
+        # 5. Fecha e limpa os recursos de clipes
         for clip in scene_clips:
             clip.close()
+        if bg_music_clip:
+            bg_music_clip.close()
         final_clip.close()
         
         return output_video_path
