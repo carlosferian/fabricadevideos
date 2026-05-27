@@ -8,7 +8,7 @@ import edge_tts
 import asyncio
 from dotenv import load_dotenv
 from PIL import Image, ImageFilter, ImageDraw, ImageFont
-from moviepy import ImageClip, AudioFileClip, concatenate_videoclips
+from moviepy import ImageClip, AudioFileClip, concatenate_videoclips, VideoClip, concatenate_audioclips
 
 load_dotenv()
 
@@ -48,10 +48,29 @@ def generate_script(game_name, manual_text, video_level):
     
     Instruções:
     1. O roteiro deve ser dividido em cenas (máximo 6 cenas).
-    2. Cada cena deve ter: 
-       - 'narration': O texto que será falado (em português, tom empolgante).
-       - 'visual': Descrição do componente real do jogo que deve aparecer.
-    3. Retorne APENAS um JSON válido.
+    2. Cada cena deve ter as seguintes chaves JSON exatas:
+       - 'scene': o número da cena (1, 2, 3...)
+       - 'narration': O texto falado na narração (em português, tom altamente empolgante e explicativo).
+       - 'visual': Descrição do componente real do jogo que deve aparecer nessa cena.
+       - 'animation': O tipo de movimento de câmera ideal baseado semanticamente na narração da cena. Escolha estritamente entre uma dessas 4 opções de string:
+         * "Zoom Dinâmico (Zoom In)": Use para focar em componentes específicos, dar zoom em detalhes do tabuleiro, ou apresentar componentes novos citados na narração.
+         * "Afastamento Suave (Zoom Out)": Use para introduções de jogo (revelando a caixa inteira), conclusões ou planos de visão geral de setup do tabuleiro.
+         * "Panorâmica Lateral (Pan)": Use para varrer uma mesa de componentes, fileiras de cartas dispostas, ou progressão de regras.
+         * "Estática": Use quando não houver necessidade de movimento de câmera.
+    
+    Exemplo de formato esperado:
+    {{
+      "scenes": [
+        {{
+          "scene": 1,
+          "visual": "Caixa do jogo Catan sendo revelada na mesa",
+          "narration": "Você está pronto para colonizar a ilha mais famosa dos tabuleiros?",
+          "animation": "Afastamento Suave (Zoom Out)"
+        }}
+      ]
+    }}
+    
+    Retorne APENAS o JSON válido estruturado de acordo com o exemplo acima.
     """
 
     max_retries = 3
@@ -174,6 +193,52 @@ def download_image(url, game_name, filename):
         print(f"Erro download: {e}")
     return None
 
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+
+def generate_audio_elevenlabs(text, output_path, voice_id="9bwts2yqj2tUf5FB21IV", api_key=None):
+    """
+    Gera áudio a partir do texto usando a API do ElevenLabs (síncrono/HTTP).
+    A voz padrão é a Letícia (9bwts2yqj2tUf5FB21IV).
+    """
+    key = api_key or ELEVENLABS_API_KEY
+    if not key:
+        print("ElevenLabs: API Key não configurada. Fallback para erro.")
+        return None
+    
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    headers = {
+        "xi-api-key": key,
+        "Content-Type": "application/json",
+        "accept": "audio/mpeg"
+    }
+    data = {
+        "text": text,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.75
+        }
+    }
+    
+    try:
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        if response.status_code == 200:
+            with open(output_path, "wb") as f:
+                f.write(response.content)
+            print(f"ElevenLabs: Áudio salvo em {output_path}")
+            return output_path
+        else:
+            print(f"ElevenLabs: Erro {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        print(f"ElevenLabs: Erro na requisição: {e}")
+        return None
+
+async def generate_audio_elevenlabs_async(text, output_path, voice_id="9bwts2yqj2tUf5FB21IV", api_key=None):
+    """Gera áudio usando ElevenLabs assincronamente (roda via thread pool para manter concorrência)."""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, generate_audio_elevenlabs, text, output_path, voice_id, api_key)
+
 async def generate_audio(text, output_path, voice="pt-BR-FranciscaNeural"):
     """Gera um arquivo de áudio a partir de texto usando edge-tts."""
     communicate = edge_tts.Communicate(text, voice)
@@ -191,19 +256,30 @@ def run_generate_audio(text, output_path, voice="pt-BR-FranciscaNeural"):
 
 async def generate_multiple_audios(tasks_list):
     """
-    Gera múltiplos áudios em paralelo usando edge-tts.
-    tasks_list deve ser uma lista de tuplas/dicionários contendo (text, output_path, voice).
+    Gera múltiplos áudios em paralelo usando edge-tts ou ElevenLabs.
+    tasks_list deve ser uma lista de dicionários ou tuplas contendo os parâmetros de geração.
     """
     async_tasks = []
     for item in tasks_list:
         if isinstance(item, dict):
             text = item.get("text")
             path = item.get("path")
+            engine = item.get("engine", "edge-tts")
             voice = item.get("voice", "pt-BR-FranciscaNeural")
+            voice_id = item.get("voice_id", "9bwts2yqj2tUf5FB21IV")
+            api_key = item.get("api_key")
         else:
             text, path, voice = item
-        communicate = edge_tts.Communicate(text, voice)
-        async_tasks.append(communicate.save(path))
+            engine = "edge-tts"
+            voice_id = "9bwts2yqj2tUf5FB21IV"
+            api_key = None
+            
+        if engine == "elevenlabs":
+            async_tasks.append(generate_audio_elevenlabs_async(text, path, voice_id, api_key))
+        else:
+            communicate = edge_tts.Communicate(text, voice)
+            async_tasks.append(communicate.save(path))
+            
     await asyncio.gather(*async_tasks)
     return True
 
@@ -432,11 +508,17 @@ def get_dominant_colors(image, num_colors=2):
     try:
         img_temp = image.copy()
         img_temp.thumbnail((100, 100))
-        quantized = img_temp.quantize(colors=num_colors).convert("RGB")
+        quantized = img_temp.quantize(colors=num_colors)
         palette = quantized.getpalette()
-        c1 = (palette[0], palette[1], palette[2])
-        c2 = (palette[3], palette[4], palette[5])
-        return c1, c2
+        if palette is not None and len(palette) >= 6:
+            c1 = (palette[0], palette[1], palette[2])
+            c2 = (palette[3], palette[4], palette[5])
+            return c1, c2
+        elif palette is not None and len(palette) >= 3:
+            c1 = (palette[0], palette[1], palette[2])
+            return c1, c1
+        else:
+            return (30, 30, 45), (15, 15, 20)
     except Exception as e:
         print(f"Erro ao obter cores predominantes: {e}")
         return (30, 30, 45), (15, 15, 20)
@@ -647,10 +729,205 @@ def create_scene_frame(image_path, text, scene_num, game_name, width=1080, heigh
     bg.convert("RGB").save(temp_frame_path, "JPEG")
     return temp_frame_path
 
-def render_video(game_name, script, visual_style="Clássico", bg_music_name="Sem Música", bg_volume=0.15):
+def create_animated_scene_clip(image_path, text, scene_num, game_name, duration, width=1080, height=1920, visual_style="Clássico", animation_type="Zoom Dinâmico (Zoom In)"):
+    """
+    Gera um VideoClip da MoviePy para a cena, aplicando efeitos de animação local
+    como Ken Burns (Zoom In, Zoom Out, Pan) processados em tempo real na memória.
+    """
+    import numpy as np
+    from PIL import Image, ImageFilter, ImageDraw, ImageFont
+    from moviepy import VideoClip
+
+    try:
+        im = Image.open(image_path)
+        im_w, im_h = im.size
+    except Exception as e:
+        print(f"Erro ao abrir imagem {image_path}: {e}")
+        im = Image.new("RGB", (800, 600), color="gray")
+        im_w, im_h = im.size
+
+    # --- 1. CONFIGURAÇÃO DE BACKGROUND E BASE ---
+    bg_ratio = width / height
+    im_ratio = im_w / im_h
+    
+    if im_ratio > bg_ratio:
+        new_h = height
+        new_w = int(im_w * (height / im_h))
+        im_scaled = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        left = (new_w - width) // 2
+        bg = im_scaled.crop((left, 0, left + width, height))
+    else:
+        new_w = width
+        new_h = int(im_h * (width / im_w))
+        im_scaled = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        top = (new_h - height) // 2
+        bg = im_scaled.crop((0, top, width, top + height))
+
+    # Aplicar o estilo visual ao background
+    if visual_style == "Gradiente Moderno":
+        color1, color2 = get_dominant_colors(im, num_colors=2)
+        color1 = tuple(int(x * 0.6) for x in color1)
+        color2 = tuple(int(x * 0.3) for x in color2)
+        bg_static = create_linear_gradient(color1, color2, width, height)
+    elif visual_style == "Neon Dark":
+        bg_static = bg.filter(ImageFilter.GaussianBlur(radius=50))
+        darken = Image.new("RGBA", (width, height), (0, 0, 0, 160))
+        bg_static = Image.composite(darken, bg_static.convert("RGBA"), darken.split()[3]).convert("RGB")
+    else: # "Clássico"
+        bg_static = bg.filter(ImageFilter.GaussianBlur(radius=30))
+
+    # --- 2. PREPARAR TEXTO/LEGENDA E TEXTO OVERLAY ---
+    overlay_static = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw_overlay = ImageDraw.Draw(overlay_static)
+    
+    font = None
+    for font_name in ["arial.ttf", "calibri.ttf", "segoeui.ttf"]:
+        try:
+            font = ImageFont.truetype(font_name, 38)
+            break
+        except Exception:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+
+    box_w = width - 120
+    box_padding = 30
+    text_max_w = box_w - (2 * box_padding)
+    lines = wrap_text(text, font, text_max_w, draw_overlay)
+    
+    if lines:
+        line_bbox = draw_overlay.textbbox((0, 0), lines[0], font=font)
+        line_height = line_bbox[3] - line_bbox[1]
+    else:
+        line_height = 40
+        
+    line_spacing = 12
+    box_h = (len(lines) * line_height) + ((len(lines) - 1) * line_spacing) + (2 * box_padding)
+    box_x = 60
+    box_y = height - box_h - 150
+    
+    if visual_style == "Neon Dark":
+        neon_colors = ["#ff007f", "#00f0ff", "#39ff14", "#ffb300"]
+        neon_color = neon_colors[scene_num % len(neon_colors)]
+        draw_overlay.rounded_rectangle(
+            [box_x, box_y, box_x + box_w, box_y + box_h],
+            radius=15,
+            fill=(10, 10, 15, 210),
+            outline=neon_color,
+            width=3
+        )
+    elif visual_style == "Gradiente Moderno":
+        draw_overlay.rounded_rectangle(
+            [box_x, box_y, box_x + box_w, box_y + box_h],
+            radius=15,
+            fill=(15, 15, 22, 190)
+        )
+    else: # "Clássico"
+        draw_overlay.rounded_rectangle(
+            [box_x, box_y, box_x + box_w, box_y + box_h],
+            radius=15,
+            fill=(0, 0, 0, 180)
+        )
+        
+    current_y = box_y + box_padding
+    for line in lines:
+        line_bbox = draw_overlay.textbbox((0, 0), line, font=font)
+        line_w = line_bbox[2] - line_bbox[0]
+        line_x = box_x + (box_w - line_w) // 2
+        draw_overlay.text((line_x, current_y), line, font=font, fill="white")
+        current_y += line_height + line_spacing
+
+    # --- 3. CONFIGURAR A IMAGEM CENTRAL BASE ---
+    max_w = width - 120
+    scale_factor = max_w / im_w
+    center_w = max_w
+    center_h = int(im_h * scale_factor)
+    
+    max_h = int(height * 0.55)
+    if center_h > max_h:
+        scale_factor = max_h / im_h
+        center_h = max_h
+        center_w = int(im_w * scale_factor)
+        
+    center_im = im.resize((center_w, center_h), Image.Resampling.LANCZOS)
+    center_x = (width - center_w) // 2
+    center_y = (height - center_h) // 2 - 50
+
+    def get_frame(t):
+        frame_img = bg_static.copy()
+        progress = min(t / duration, 1.0)
+        
+        zoom = 1.0
+        offset_x = 0
+        offset_y = 0
+        
+        if animation_type == "Zoom Dinâmico (Zoom In)":
+            zoom = 1.0 + 0.12 * progress
+        elif animation_type == "Afastamento Suave (Zoom Out)":
+            zoom = 1.12 - 0.12 * progress
+        elif animation_type == "Panorâmica Lateral (Pan)":
+            zoom = 1.10
+            max_pan = int(center_w * 0.05)
+            offset_x = int(-max_pan + (2 * max_pan * progress))
+
+        w_anim = int(center_w * zoom)
+        h_anim = int(center_h * zoom)
+        
+        w_anim = max(10, min(w_anim, width * 2))
+        h_anim = max(10, min(h_anim, height * 2))
+        
+        center_im_anim = center_im.resize((w_anim, h_anim), Image.Resampling.LANCZOS)
+        
+        x_anim = center_x + (center_w - w_anim) // 2 + offset_x
+        y_anim = center_y + (center_h - h_anim) // 2 + offset_y
+        
+        center_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw_center = ImageDraw.Draw(center_layer)
+        
+        if visual_style == "Gradiente Moderno":
+            border_pad = 6
+            draw_center.rounded_rectangle(
+                [x_anim - border_pad, y_anim - border_pad, x_anim + w_anim + border_pad, y_anim + h_anim + border_pad],
+                radius=35 + border_pad,
+                fill="white"
+            )
+            rounded_im = round_corners(center_im_anim, radius=35)
+            center_layer.paste(rounded_im, (x_anim, y_anim), mask=rounded_im)
+            
+        elif visual_style == "Neon Dark":
+            neon_colors = ["#ff007f", "#00f0ff", "#39ff14", "#ffb300"]
+            neon_color = neon_colors[scene_num % len(neon_colors)]
+            border_pad = 6
+            draw_center.rounded_rectangle(
+                [x_anim - border_pad, y_anim - border_pad, x_anim + w_anim + border_pad, y_anim + h_anim + border_pad],
+                radius=30 + border_pad,
+                fill=neon_color
+            )
+            draw_center.rounded_rectangle(
+                [x_anim - 2, y_anim - 2, x_anim + w_anim + 2, y_anim + h_anim + 2],
+                radius=30 + 2,
+                fill="black"
+            )
+            rounded_im = round_corners(center_im_anim, radius=30)
+            center_layer.paste(rounded_im, (x_anim, y_anim), mask=rounded_im)
+            
+        else: # "Clássico"
+            border_width = 4
+            bordered_im = Image.new("RGB", (w_anim + 2*border_width, h_anim + 2*border_width), color="white")
+            bordered_im.paste(center_im_anim, (border_width, border_width))
+            center_layer.paste(bordered_im, (x_anim - border_width, y_anim - border_width))
+            
+        final_frame = Image.alpha_composite(frame_img.convert("RGBA"), center_layer)
+        final_frame = Image.alpha_composite(final_frame, overlay_static)
+        
+        return np.array(final_frame.convert("RGB"))
+
+    return VideoClip(get_frame, duration=duration)
+
+def render_video(game_name, script, visual_style="Clássico", bg_music_name="Sem Música", bg_volume=0.15, animation_type="Estática"):
     """
     Renderiza o vídeo final a partir da imagem do jogo e os áudios das cenas.
-    Permite mixar música de fundo (BGM) e aplicar estilos visuais diferenciados.
+    Permite mixar música de fundo (BGM), aplicar estilos visuais diferenciados e animações locais.
     Salva em assets/{game_name}/video_final.mp4.
     Retorna o caminho do vídeo gerado ou None se houver erro.
     """
@@ -668,7 +945,7 @@ def render_video(game_name, script, visual_style="Clássico", bg_music_name="Sem
     temp_frames = []
     
     try:
-        # 1. Renderiza cada frame individualmente e carrega as locuções correspondentes
+        # 1. Renderiza cada cena/clipe individualmente e carrega as locuções correspondentes
         for scene in script:
             scene_num = scene.get("scene", 0)
             narration = scene.get("narration", "")
@@ -678,21 +955,48 @@ def render_video(game_name, script, visual_style="Clássico", bg_music_name="Sem
                 print(f"Erro: áudio da cena {scene_num} não encontrado.")
                 continue
                 
+            # Determine specific scene image path
+            scene_img_path = os.path.join(dest_dir, f"scene_{scene_num}.jpg")
+            if not os.path.exists(scene_img_path):
+                scene_img_path = os.path.join(dest_dir, f"scene_{scene_num}.png")
+            if not os.path.exists(scene_img_path):
+                scene_img_path = os.path.join(dest_dir, f"scene_{scene_num}.jpeg")
+                
+            # If no scene-specific image is found, fall back to global image_path
+            current_image_path = scene_img_path if os.path.exists(scene_img_path) else image_path
+            
+            # Determine animation type for this scene
+            scene_animation = scene.get("animation", "Zoom Dinâmico (Zoom In)")
+            current_anim = scene_animation if animation_type == "Contextual (Definido no Roteiro)" else animation_type
+            
             audio_clip = AudioFileClip(audio_path)
             duration = audio_clip.duration
             
-            # Passa o estilo visual selecionado
-            temp_frame = create_scene_frame(image_path, narration, scene_num, game_name, visual_style=visual_style)
-            temp_frames.append(temp_frame)
-            
-            image_clip = ImageClip(temp_frame).with_duration(duration).with_audio(audio_clip)
-            scene_clips.append(image_clip)
+            if current_anim == "Estática" or current_anim == "":
+                # Modo clássico estático - gera frame JPG temporário
+                temp_frame = create_scene_frame(current_image_path, narration, scene_num, game_name, visual_style=visual_style)
+                temp_frames.append(temp_frame)
+                scene_clip = ImageClip(temp_frame).with_duration(duration)
+            else:
+                # Modo animado (Ken Burns) - processado inteiramente em memória via Pillow/MoviePy
+                scene_clip = create_animated_scene_clip(
+                    image_path=current_image_path,
+                    text=narration,
+                    scene_num=scene_num,
+                    game_name=game_name,
+                    duration=duration,
+                    visual_style=visual_style,
+                    animation_type=current_anim
+                )
+                
+            scene_clip = scene_clip.with_audio(audio_clip)
+            scene_clips.append(scene_clip)
             
         if not scene_clips:
             print("Nenhuma cena válida pôde ser carregada para renderização.")
             return None
             
-        # 2. Concatena os clipes de imagem com áudio
+        # 2. Concatena os clipes de imagem/vídeo com áudio
         final_clip = concatenate_videoclips(scene_clips, method="compose")
         
         # 3. Adiciona a trilha de música de fundo (BGM) se configurada
@@ -734,7 +1038,7 @@ def render_video(game_name, script, visual_style="Clássico", bg_music_name="Sem
                     print(f"Erro ao adicionar música de fundo: {audio_err}")
             else:
                 print(f"BGM: Arquivo '{bg_music_name}' não encontrado em {bg_music_dir}.")
-
+ 
         # 4. Grava o arquivo de vídeo final
         output_video_path = os.path.join(dest_dir, "video_final.mp4")
         
@@ -906,3 +1210,93 @@ def delete_game_assets(game_name, delete_type):
     except Exception as e:
         print(f"Erro ao deletar ativos de tipo '{delete_type}' para o jogo '{game_name}': {e}")
     return False
+
+def generate_social_metadata(game_name, script):
+    """
+    Gera títulos, legendas e hashtags com base no roteiro gerado para o jogo.
+    Retorna um dicionário com os campos 'titles', 'captions' e 'hashtags', ou None se falhar.
+    """
+    if not OPENROUTER_API_KEY:
+        return {"error": "OPENROUTER_API_KEY não configurada no arquivo .env"}
+
+    # Formata o roteiro para texto legível
+    script_text = ""
+    for i, scene in enumerate(script):
+        s_num = scene.get("scene", i + 1)
+        s_nar = scene.get("narration", "")
+        s_vis = scene.get("visual", "")
+        script_text += f"Cena {s_num}:\n- Visual: {s_vis}\n- Locução: {s_nar}\n\n"
+
+    prompt = f"""
+    Você é um Copywriter e Especialista em Redes Sociais altamente estratégico para canais de Board Games.
+    Com base no roteiro do vídeo abaixo sobre o jogo "{game_name}", gere ideias altamente engajadoras de metadados sociais para publicação no TikTok, Instagram Reels e YouTube Shorts.
+
+    Roteiro do Vídeo:
+    {script_text}
+
+    Instruções:
+    1. Gere 3 opções de Títulos extremamente chamativos e curtos (máximo 80 caracteres), com gatilhos de curiosidade ou diversão.
+    2. Gere 2 opções de Legendas (Copys) para postagem:
+       - Opção 1: Direta e focada em engajamento rápido (ideal para TikTok).
+       - Opção 2: Narrativa, com um breve gancho, chamada para ação (CTA) como "Marque o amigo" ou "Comente o que achou", ideal para Reels.
+    3. Gere um bloco estratégico com cerca de 10 Hashtags de nicho (ex: #boardgames, #jogosdetabuleiro, #dicasdejogos) e do próprio jogo.
+    
+    Retorne a resposta APENAS como um objeto JSON válido no formato abaixo, sem formatação markdown ou blocos de código (ex: não inclua ```json):
+    {{
+        "titles": ["Título 1", "Título 2", "Título 3"],
+        "captions": ["Legenda Opção 1", "Legenda Opção 2"],
+        "hashtags": "#hashtag1 #hashtag2 #hashtag3"
+    }}
+    """
+
+    try:
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "HTTP-Referer": "https://github.com/gemini-cli/fabricadevideos",
+                "X-OpenRouter-Title": "Fabrica de Videos",
+            },
+            data=json.dumps({
+                "model": "openrouter/auto",
+                "messages": [
+                    {"role": "system", "content": "Você é um redator de mídias sociais especializado em jogos de tabuleiro. Responda APENAS com o JSON."},
+                    {"role": "user", "content": prompt}
+                ]
+            }),
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if "choices" in result:
+                content = result["choices"][0]["message"]["content"]
+                # Limpeza contra markdown ```json
+                content = content.replace("```json", "").replace("```", "").strip()
+                data = json.loads(content)
+                
+                # Grava no arquivo metadata.txt na pasta de assets do jogo
+                dest_dir = save_assets_dir(game_name)
+                metadata_path = os.path.join(dest_dir, "metadata.txt")
+                with open(metadata_path, "w", encoding="utf-8") as f:
+                    f.write(f"=== TÍTULOS SUGERIDOS ===\n")
+                    for i, t in enumerate(data.get("titles", [])):
+                        f.write(f"{i+1}. {t}\n")
+                    f.write(f"\n=== LEGENDA 1 (TikTok) ===\n{data.get('captions', [''])[0]}\n")
+                    if len(data.get("captions", [])) > 1:
+                        f.write(f"\n=== LEGENDA 2 (Instagram/Reels) ===\n{data.get('captions', [''])[1]}\n")
+                    f.write(f"\n=== HASHTAGS ===\n{data.get('hashtags', '')}\n")
+                
+                # Grava também um JSON para reuso
+                metadata_json_path = os.path.join(dest_dir, "metadata.json")
+                with open(metadata_json_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=4)
+                    
+                return data
+            else:
+                return {"error": f"Erro na resposta da API OpenRouter: {result.get('error', {}).get('message', 'Sem detalhes')}"}
+        else:
+            return {"error": f"Erro HTTP {response.status_code} na API OpenRouter"}
+    except Exception as e:
+        print(f"Erro ao gerar metadados sociais: {e}")
+        return {"error": str(e)}

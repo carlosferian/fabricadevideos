@@ -9,3 +9,5 @@ python-dotenv
 pillow
 xmltodict
 duckduckgo_search
+streamlit-option-menu
+streamlit-antd-components

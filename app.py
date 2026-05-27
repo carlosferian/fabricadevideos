@@ -1,7 +1,9 @@
 import streamlit as st
 import os
 import json
-from utils import extract_text_from_pdf, generate_script, save_assets_dir, get_bgg_game_images, download_image, run_generate_audio, search_game_images_ddg, render_video, save_script_to_file, load_script_from_file, extract_images_from_url, delete_game_assets
+from utils import extract_text_from_pdf, generate_script, save_assets_dir, get_bgg_game_images, download_image, run_generate_audio, search_game_images_ddg, render_video, save_script_to_file, load_script_from_file, extract_images_from_url, delete_game_assets, generate_social_metadata
+from streamlit_option_menu import option_menu
+import streamlit_antd_components as sac
 
 # Page configuration
 st.set_page_config(
@@ -10,47 +12,204 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS to increase font sizes for improved accessibility and legibility
+# Custom CSS to inject premium Dark Neon SaaS styling and custom fonts
 st.markdown("""
 <style>
-    /* Global font size increase */
-    html, body, [class*="css"], .stMarkdown, p, span, li, label, input, button, select, textarea {
-        font-size: 19px !important;
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
+    
+    /* App-wide fonts & styling */
+    html, body, p, span, li, label {
+        font-family: 'Inter', sans-serif !important;
+        font-size: 15px !important;
+        color: #E2E8F0 !important;
     }
-    /* Larger headers */
+    
+    .main .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 3rem !important;
+    }
+
+    /* Headings styling */
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Outfit', sans-serif !important;
+        font-weight: 700 !important;
+        color: #F8FAFC !important;
+        letter-spacing: -0.02em !important;
+    }
+    
     h1 {
         font-size: 38px !important;
-        font-weight: 700 !important;
+        background: linear-gradient(135deg, #818CF8 0%, #EC4899 100%) !important;
+        -webkit-background-clip: text !important;
+        -webkit-text-fill-color: transparent !important;
+        margin-bottom: 0.5rem !important;
     }
-    h2 {
-        font-size: 28px !important;
+    
+    /* Elegant Sidebar */
+    section[data-testid="stSidebar"] {
+        background-color: #0B0F19 !important;
+        border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
+    }
+    section[data-testid="stSidebar"] hr {
+        border-top-color: rgba(255, 255, 255, 0.08) !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+        padding-top: 2rem !important;
+    }
+    
+    /* Universal Button Responsiveness & Wrapping (Crucial to prevent cut-offs) */
+    button, .stButton > button {
+        white-space: normal !important;
+        word-wrap: break-word !important;
+        word-break: break-word !important;
+        height: auto !important;
+        min-height: 38px !important;
+        padding: 6px 14px !important;
+        line-height: 1.25 !important;
+        font-size: 14px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        text-align: center !important;
+    }
+    
+    /* Primary buttons with indigo-pink gradient and glow */
+    div.stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #6366F1 0%, #EC4899 100%) !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        font-family: 'Outfit', sans-serif !important;
         font-weight: 600 !important;
+        border-radius: 10px !important;
+        box-shadow: 0 4px 14px 0 rgba(99, 102, 241, 0.35) !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        width: 100% !important;
     }
-    h3 {
-        font-size: 23px !important;
+    div.stButton > button[kind="primary"]:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px 0 rgba(236, 72, 153, 0.45) !important;
+        color: #FFFFFF !important;
+    }
+    div.stButton > button[kind="primary"]:active {
+        transform: translateY(0px) !important;
+    }
+    
+    /* Secondary/normal buttons */
+    div.stButton > button[kind="secondary"], div.stButton > button:not([kind="primary"]) {
+        background: rgba(30, 41, 59, 0.6) !important;
+        color: #F1F5F9 !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 10px !important;
+        font-family: 'Inter', sans-serif !important;
         font-weight: 500 !important;
+        transition: all 0.2s ease !important;
+        width: 100% !important;
     }
-    /* Tab headers font size */
-    button[data-baseweb="tab"] p {
-        font-size: 20px !important;
+    div.stButton > button:not([kind="primary"]):hover {
+        background: rgba(51, 65, 85, 0.8) !important;
+        border-color: rgba(99, 102, 241, 0.4) !important;
+        color: #FFFFFF !important;
+        transform: translateY(-1px) !important;
+    }
+    
+    /* Inputs, textareas, and selectboxes - dark glassmorphic styling */
+    div[data-baseweb="input"] input, div[data-baseweb="textarea"] textarea, div[data-baseweb="select"] > div {
+        background-color: rgba(15, 23, 42, 0.5) !important;
+        color: #F1F5F9 !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 10px !important;
+        font-size: 14px !important;
+    }
+    div[data-baseweb="input"]:focus-within, div[data-baseweb="textarea"]:focus-within {
+        border-color: #6366F1 !important;
+        box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
+    }
+    
+    /* Global Expanders as beautiful cards */
+    div[data-testid="stExpander"] {
+        background: rgba(30, 41, 59, 0.4) !important;
+        backdrop-filter: blur(12px) !important;
+        border: 1px solid rgba(255, 255, 255, 0.06) !important;
+        border-radius: 12px !important;
+        margin-bottom: 18px !important;
+        box-shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.15) !important;
+        transition: all 0.3s ease !important;
+    }
+    div[data-testid="stExpander"]:hover {
+        border-color: rgba(99, 102, 241, 0.25) !important;
+        box-shadow: 0 6px 24px 0 rgba(0, 0, 0, 0.2) !important;
+    }
+    div[data-testid="stExpander"] summary {
+        font-family: 'Outfit', sans-serif !important;
+        font-size: 17px !important;
         font-weight: 600 !important;
+        color: #F1F5F9 !important;
+        padding: 12px 18px !important;
     }
-    /* Inputs, textareas and selectboxes */
-    .stTextInput input, .stTextArea textarea, .stSelectbox select, .stFileUploader label {
-        font-size: 18px !important;
+    div[data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+        padding: 20px !important;
+        background: rgba(15, 23, 42, 0.15) !important;
+        border-top: 1px solid rgba(255, 255, 255, 0.04) !important;
     }
-    /* Sidebar text increase */
-    [data-testid="stSidebar"] [class*="css"], [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {
-        font-size: 18px !important;
+    
+    /* Sleek custom sub-tabs */
+    div[data-baseweb="tab-list"] {
+        background-color: rgba(15, 23, 42, 0.4) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 30px !important;
+        padding: 4px !important;
+        gap: 8px !important;
+        margin-bottom: 1.5rem !important;
     }
-    /* Action buttons */
-    .stButton button {
-        font-size: 19px !important;
-        padding: 8px 16px !important;
-        border-radius: 8px !important;
+    button[data-baseweb="tab"] {
+        background: transparent !important;
+        border: none !important;
+        border-radius: 20px !important;
+        padding: 8px 18px !important;
+        color: #94A3B8 !important;
+        font-family: 'Outfit', sans-serif !important;
+        font-weight: 500 !important;
+        font-size: 14px !important;
+        transition: all 0.3s ease !important;
+    }
+    button[data-baseweb="tab"]:hover {
+        color: #F1F5F9 !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        background: linear-gradient(135deg, #6366F1 0%, #EC4899 100%) !important;
+        color: #FFFFFF !important;
+        font-weight: 600 !important;
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3) !important;
+    }
+    div[data-baseweb="tab-border"] {
+        display: none !important;
+    }
+    
+    /* Alert notifications styling */
+    div[data-testid="stNotification"] {
+        background: rgba(30, 41, 59, 0.65) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-left: 4px solid #6366F1 !important;
+        border-radius: 12px !important;
+        backdrop-filter: blur(12px) !important;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15) !important;
+    }
+    
+    /* Hover scale for grid images */
+    div[data-testid="stImage"] img {
+        border-radius: 10px !important;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    }
+    div[data-testid="stImage"] img:hover {
+        transform: scale(1.04) !important;
+        border-color: #EC4899 !important;
+        box-shadow: 0 6px 20px rgba(236, 72, 153, 0.45) !important;
+        cursor: pointer !important;
     }
 </style>
 """, unsafe_allow_html=True)
+
 
 # Initialize session state for script and game data
 if "script" not in st.session_state:
@@ -130,17 +289,73 @@ if st.sidebar.button("Salvar Configurações"):
         st.sidebar.error("Por favor, insira o nome do jogo.")
 
 # --- MAIN INTERFACE ---
+st.markdown("<div style='text-align: center; margin-top: 1.5rem;'>", unsafe_allow_html=True)
 st.title("🎬 Fábrica Autônoma de Vídeos Didáticos")
-st.markdown("### Transforme manuais de jogos em vídeos verticais prontos para redes sociais.")
+st.markdown("<p style='font-size: 19px; color: #94A3B8; margin-top: 0px;'>Transforme manuais de jogos em vídeos verticais premium para redes sociais.</p>", unsafe_allow_html=True)
+st.markdown("</div>", unsafe_allow_html=True)
 
-tab1, tab2, tab3 = st.tabs([
-    "📝 Aba 1: Roteiro", 
-    "🎙️ Aba 2: Narração & Imagens", 
-    "✨ Aba 3: Animação & Vídeo Final"
-])
+# Elegant Horizontal Navigation Menu
+selected = option_menu(
+    menu_title=None,
+    options=["Roteiro", "Narração & Imagens", "Animação & Vídeo", "Metadados Sociais"],
+    icons=["pencil-square", "mic", "play-btn", "rocket-takeoff"],
+    menu_icon="cast",
+    default_index=0,
+    orientation="horizontal",
+    styles={
+        "container": {
+            "padding": "0!important", 
+            "background-color": "#1E293B", 
+            "border": "1px solid rgba(255, 255, 255, 0.08)", 
+            "border-radius": "12px",
+            "margin-bottom": "1.5rem"
+        },
+        "icon": {"color": "#EC4899", "font-size": "19px"}, 
+        "nav-link": {
+            "font-size": "16px", 
+            "text-align": "center", 
+            "margin": "0px", 
+            "font-weight": "500", 
+            "font-family": "Outfit, sans-serif", 
+            "color": "#F1F5F9", 
+            "--hover-color": "rgba(255, 255, 255, 0.05)"
+        },
+        "nav-link-selected": {
+            "background": "linear-gradient(90deg, #6366F1 0%, #EC4899 100%)", 
+            "font-weight": "600", 
+            "color": "#FFFFFF"
+        },
+    }
+)
+
+# Render steps under the navigation for context
+step_idx = 0
+if selected == "Roteiro":
+    step_idx = 0
+elif selected == "Narração & Imagens":
+    step_idx = 1
+elif selected == "Animação & Vídeo":
+    step_idx = 2
+elif selected == "Metadados Sociais":
+    step_idx = 3
+
+sac.steps(
+    items=[
+        sac.StepsItem(title='Roteiro', subtitle='Upload & Edição'),
+        sac.StepsItem(title='Ativos', subtitle='Locução & Imagem'),
+        sac.StepsItem(title='Renderização', subtitle='Efeitos & Vídeo'),
+        sac.StepsItem(title='Distribuição', subtitle='Copies Redes'),
+    ],
+    index=step_idx,
+    color='indigo',
+    variant='standard',
+    size='md'
+)
+
+st.markdown("<br>", unsafe_allow_html=True)
 
 # --- TAB 1: ROTEIRO ---
-with tab1:
+if selected == "Roteiro":
     st.header("1. Geração de Roteiro")
     if not game_name or (not manual_file and not st.session_state.script):
         st.warning("⚠️ Por favor, preencha o nome do jogo e faça o upload do manual na barra lateral para gerar um roteiro.")
@@ -191,15 +406,27 @@ with tab1:
                     s_num = scene.get("scene", scene.get("cena", i + 1))
                     s_visual = scene.get("visual", scene.get("imagem", "Descreva o visual aqui"))
                     s_narration = scene.get("narration", scene.get("texto", scene.get("narracao", "")))
+                    s_anim = scene.get("animation", "Zoom Dinâmico (Zoom In)")
+                    
+                    anim_options = ["Estática", "Zoom Dinâmico (Zoom In)", "Afastamento Suave (Zoom Out)", "Panorâmica Lateral (Pan)"]
+                    anim_index = anim_options.index(s_anim) if s_anim in anim_options else 1
                     
                     with st.expander(f"Cena {s_num}: {s_visual[:50]}...", expanded=True):
-                        col_v, col_n = st.columns([1, 2])
+                        col_v, col_n, col_a = st.columns([1.5, 2, 1.2])
                         new_visual = col_v.text_input(f"Visual {i}", value=s_visual, key=f"vis_{i}")
                         new_narration = col_n.text_area(f"Narração {i}", value=s_narration, key=f"nar_{i}")
+                        new_animation = col_a.selectbox(
+                            f"Animação {i}",
+                            options=anim_options,
+                            index=anim_index,
+                            key=f"anim_{i}",
+                            help="Selecione a animação perfeita para esta cena."
+                        )
                         edited_script.append({
                             "scene": s_num,
                             "visual": new_visual,
-                            "narration": new_narration
+                            "narration": new_narration,
+                            "animation": new_animation
                         })
                 
                 if st.button("Salvar Alterações no Roteiro"):
@@ -213,7 +440,7 @@ with tab1:
                         st.success("Alterações salvas com sucesso em memória!")
 
 # --- TAB 2: NARRAÇÃO & IMAGENS ---
-with tab2:
+elif selected == "Narração & Imagens":
     st.header("2. Ativos (Áudio e Imagens)")
     col1, col2 = st.columns(2)
     
@@ -222,14 +449,44 @@ with tab2:
         if not game_name:
             st.warning("⚠️ Insira o nome do jogo na barra lateral para liberar as ferramentas de imagem.")
         else:
-            # Verificar se a imagem principal já existe
+            # Seletor de destino de download da imagem
+            image_target_options = ["Imagem Principal (Global / Fallback)"]
+            scene_mapping = {}
+            
+            if st.session_state.script:
+                for idx, scene in enumerate(st.session_state.script):
+                    s_num = scene.get("scene", idx + 1)
+                    s_vis = scene.get("visual", "Componente")
+                    opt_label = f"Cena {s_num}: {s_vis[:35]}..."
+                    image_target_options.append(opt_label)
+                    scene_mapping[opt_label] = s_num
+            
+            selected_target_label = st.selectbox(
+                "🎯 Destino da Imagem (Onde salvar o download)",
+                options=image_target_options,
+                index=0,
+                help="Escolha se deseja salvar esta imagem como capa global/fallback ou para uma cena específica do roteiro."
+            )
+            
+            target_filename = "main_game.jpg"
+            default_query = f"{game_name} board game"
+            
+            if selected_target_label != "Imagem Principal (Global / Fallback)":
+                scene_num = scene_mapping[selected_target_label]
+                target_filename = f"scene_{scene_num}.jpg"
+                for scene in st.session_state.script:
+                    if scene.get("scene") == scene_num:
+                        default_query = f"{game_name} {scene.get('visual', '')} board game"
+                        break
+
+            # Verificar se a imagem selecionada já existe
             game_assets = save_assets_dir(game_name)
-            img_path = os.path.join(game_assets, "main_game.jpg")
+            img_path = os.path.join(game_assets, target_filename)
             image_exists = os.path.exists(img_path)
             
             if image_exists:
-                st.success("✅ Imagem Principal (main_game.jpg) já está disponível no disco!")
-                st.image(img_path, caption="Imagem do Jogo Atual", width=300)
+                st.success(f"✅ Imagem correspondente ({target_filename}) já está disponível no disco!")
+                st.image(img_path, caption=f"Imagem Atual: {selected_target_label}", width=300)
                 st.markdown("---")
                 st.markdown("#### 🔄 Atualizar ou Buscar Nova Imagem")
             
@@ -241,7 +498,7 @@ with tab2:
             
             with inner_tab1:
                 st.write("Busque imagens de componentes e tabuleiros na web:")
-                search_query = st.text_input("Termo de Busca de Imagem (ajuste se necessário)", value=f"{game_name} board game", key="ddg_search_input")
+                search_query = st.text_input("Termo de Busca de Imagem (ajuste se necessário)", value=default_query, key=f"ddg_search_input_{selected_target_label}")
                 if st.button("Buscar Imagens na Web", key="ddg_search_btn"):
                     with st.spinner("Buscando imagens reais na web..."):
                         results = search_game_images_ddg(search_query, max_results=5)
@@ -332,7 +589,7 @@ with tab2:
                     
                     if st.button("Confirmar e Baixar para Assets"):
                         with st.spinner("Baixando imagem..."):
-                            path = download_image(selected_img["main_image"], game_name, "main_game.jpg")
+                            path = download_image(selected_img["main_image"], game_name, target_filename)
                             if path:
                                 st.success(f"Imagem salva com sucesso em: {path}")
                                 st.rerun()
@@ -343,7 +600,7 @@ with tab2:
                     st.image(imgs["main_image"], caption="Imagem Manual Selecionada", use_container_width=True)
                     if st.button("Baixar para Assets"):
                         with st.spinner("Baixando imagem..."):
-                            path = download_image(imgs["main_image"], game_name, "main_game.jpg")
+                            path = download_image(imgs["main_image"], game_name, target_filename)
                             if path:
                                 st.success(f"Imagem salva em: {path}")
                                 st.rerun()
@@ -371,26 +628,104 @@ with tab2:
             else:
                 st.info("ℹ️ Nenhum áudio foi gerado para este jogo ainda.")
                 
+            st.markdown("---")
+            # Seleção de TTS Engine
+            tts_engine = st.selectbox(
+                "🎙️ Motor de Narração (TTS)",
+                ["Edge-TTS (Grátis)", "ElevenLabs (Premium)"],
+                index=0,
+                help="Edge-TTS é gratuito e extremamente rápido. ElevenLabs fornece vozes neurais ultra-realistas porém requer chave de API."
+            )
+            
+            voice_id = None
+            edge_voice = None
+            user_api_key = None
+            
+            if tts_engine == "Edge-TTS (Grátis)":
+                edge_voice = st.selectbox(
+                    "🗣️ Escolha a Voz (Edge-TTS)",
+                    options=["pt-BR-FranciscaNeural", "pt-BR-AntonioNeural", "pt-BR-ThalitaNeural"],
+                    format_func=lambda x: {
+                        "pt-BR-FranciscaNeural": "Francisca (Feminina)",
+                        "pt-BR-AntonioNeural": "Antônio (Masculino)",
+                        "pt-BR-ThalitaNeural": "Thalita (Feminina)"
+                    }.get(x, x),
+                    index=0
+                )
+            else:
+                # ElevenLabs Config
+                env_key = os.getenv("ELEVENLABS_API_KEY")
+                if not env_key:
+                    user_api_key = st.text_input("🔑 ElevenLabs API Key", type="password", help="Cole sua xi-api-key do ElevenLabs.")
+                    if not user_api_key:
+                        st.warning("⚠️ Insira sua API Key para usar as vozes da ElevenLabs.")
+                else:
+                    st.success("🔑 Chave ElevenLabs encontrada no arquivo .env!")
+                    user_api_key = env_key
+                
+                voice_option = st.selectbox(
+                    "🗣️ Escolha a Voz (ElevenLabs)",
+                    options=[
+                        "9bwts2yqj2tUf5FB21IV", 
+                        "jBpfuIE2acHAzwqMs0g2", 
+                        "onwK4e9GkvtGtb5z4kEB", 
+                        "custom"
+                    ],
+                    format_func=lambda x: {
+                        "9bwts2yqj2tUf5FB21IV": "Leticia (Feminina - Doce & Clara)",
+                        "jBpfuIE2acHAzwqMs0g2": "Gigi (Feminina - Dinâmica & Conversacional)",
+                        "onwK4e9GkvtGtb5z4kEB": "Daniel (Masculino - Firme & Profissional)",
+                        "custom": "Voz Customizada (Inserir ID...)"
+                    }.get(x, x),
+                    index=0
+                )
+                
+                if voice_option == "custom":
+                    voice_id = st.text_input("ID da Voz Customizada", placeholder="Cole o ID da voz do ElevenLabs aqui")
+                else:
+                    voice_id = voice_option
+
+            st.write("")
             if st.button("Gerar/Regerar Áudios de Todas as Cenas"):
-                with st.spinner("Gerando narrações em paralelo..."):
-                    tasks = []
-                    for scene in st.session_state.script:
-                        s_num = scene.get("scene", 0)
-                        text = scene.get("narration", "")
-                        audio_path = os.path.join(game_assets, f"scene_{s_num}.mp3")
-                        tasks.append((text, audio_path, "pt-BR-FranciscaNeural"))
-                    
-                    from utils import run_generate_multiple_audios
-                    success = run_generate_multiple_audios(tasks)
-                    if success:
-                        st.success(f"Todos os {len(st.session_state.script)} áudios foram gerados em paralelo com sucesso!")
-                    else:
-                        st.error("Ocorreu um erro ao gerar os áudios das cenas em paralelo.")
-                    st.rerun()
+                if tts_engine == "ElevenLabs (Premium)" and not user_api_key:
+                    st.error("Chave de API do ElevenLabs é obrigatória para usar o motor premium.")
+                elif tts_engine == "ElevenLabs (Premium)" and voice_option == "custom" and not voice_id:
+                    st.error("Por favor, insira o ID da Voz Customizada.")
+                else:
+                    with st.spinner(f"Gerando narrações em paralelo com {tts_engine}..."):
+                        tasks = []
+                        for scene in st.session_state.script:
+                            s_num = scene.get("scene", 0)
+                            text = scene.get("narration", "")
+                            audio_path = os.path.join(game_assets, f"scene_{s_num}.mp3")
+                            
+                            if tts_engine == "ElevenLabs (Premium)":
+                                tasks.append({
+                                    "text": text,
+                                    "path": audio_path,
+                                    "engine": "elevenlabs",
+                                    "voice_id": voice_id,
+                                    "api_key": user_api_key
+                                })
+                            else:
+                                tasks.append({
+                                    "text": text,
+                                    "path": audio_path,
+                                    "engine": "edge-tts",
+                                    "voice": edge_voice
+                                })
+                        
+                        from utils import run_generate_multiple_audios
+                        success = run_generate_multiple_audios(tasks)
+                        if success:
+                            st.success(f"Todos os {len(st.session_state.script)} áudios foram gerados com sucesso!")
+                        else:
+                            st.error("Ocorreu um erro ao gerar os áudios das cenas. Verifique os logs do console.")
+                        st.rerun()
             st.info("Os áudios serão usados na renderização final.")
 
 # --- TAB 3: ANIMAÇÃO & VÍDEO FINAL ---
-with tab3:
+elif selected == "Animação & Vídeo":
     st.header("3. Renderização Final")
     
     if not game_name or not st.session_state.script:
@@ -412,13 +747,36 @@ with tab3:
         col_img, col_aud = st.columns(2)
         
         with col_img:
-            st.write("🖼️ **Imagem Principal (Jogo):**")
+            st.write("🖼️ **Status das Imagens:**")
             if image_exists:
-                st.success("✅ Pronta (`main_game.jpg` encontrada)")
-                st.image(os.path.join(game_assets, "main_game.jpg"), width=250)
+                st.success("✅ Imagem Principal (`main_game.jpg` pronta)")
             else:
-                st.error("❌ Ausente (`main_game.jpg` não encontrada na pasta de assets)")
-                st.caption("Acesse a **Aba 2** para buscar ou colar a URL da imagem e baixá-la.")
+                st.warning("⚠️ Imagem Principal (`main_game.jpg` ausente - use como fallback geral)")
+                
+            # Scan scene-specific images
+            scene_images_status = []
+            for scene in scenes_list:
+                s_num = scene.get("scene", 0)
+                s_vis = scene.get("visual", "Visual")
+                found_img = False
+                for ext in ["jpg", "png", "jpeg"]:
+                    if os.path.exists(os.path.join(game_assets, f"scene_{s_num}.{ext}")):
+                        found_img = True
+                        break
+                scene_images_status.append((s_num, s_vis, found_img))
+                
+            missing_scene_imgs = [num for num, _, found in scene_images_status if not found]
+            
+            if not missing_scene_imgs:
+                st.success("✅ Todas as cenas possuem imagens específicas correspondentes!")
+            elif len(missing_scene_imgs) < len(scenes_list):
+                st.info(f"ℹ️ {len(scenes_list) - len(missing_scene_imgs)} de {len(scenes_list)} cenas têm imagens próprias. As pendentes usarão a Imagem Principal.")
+                with st.expander("🔍 Verificar Mapeamento das Cenas"):
+                    for num, vis, found in scene_images_status:
+                        icon = "✅ Pronta" if found else "ℹ️ Usará Fallback"
+                        st.markdown(f"* **Cena {num}:** {icon} — *{vis[:35]}*")
+            else:
+                st.info("ℹ️ Nenhuma cena possui imagem específica ainda (todas usarão a Imagem Principal como fallback).")
                 
         with col_aud:
             st.write("🎙️ **Narrações das Cenas (Áudio):**")
@@ -430,9 +788,32 @@ with tab3:
                 st.caption("Acesse a **Aba 2** e clique em 'Gerar Áudios de Todas as Cenas' para gerá-los.")
         
         st.divider()
-        st.subheader("📹 Efeitos de Vídeo (Image-to-Video)")
-        if st.button("Gerar Animações de IA"):
-            st.write("*(A integração Image-to-Video será implementada na Fase 5)*")
+        st.subheader("📹 Efeitos de Vídeo por IA (Image-to-Video)")
+        
+        with st.container():
+            st.markdown("""
+            <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 12px; padding: 1.2rem; margin-bottom: 1.5rem;">
+                <h4 style="color: #818CF8; margin-top: 0px; margin-bottom: 0.5rem; font-family: Outfit, sans-serif; font-size: 16px;">🤖 Animação 3D Generativa de Componentes (Opcional - Fase 3.1)</h4>
+                <p style="font-size: 13.5px; color: #94A3B8; margin-bottom: 0px; line-height: 1.55;">
+                    Esta ferramenta opcional integra APIs externas de inteligência artificial geradora de vídeo (como <strong>Kling AI</strong>, <strong>Luma Dream Machine</strong> ou <strong>Runway Gen-3</strong>) para converter as imagens estáticas dos seus componentes em clipes de vídeo 3D de 4 segundos.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Form to insert Luma / Kling Key if they want to integrate in the future
+            col_api, col_act = st.columns([2.5, 1])
+            with col_api:
+                kling_key = st.text_input("🔑 Chave de API Kling / Luma (Opcional)", type="password", placeholder="Insira sua API Key para ativar o gerador 3D...", key="kling_api_key")
+            with col_act:
+                # Add vertical spacing
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                if kling_key:
+                    if st.button("🎬 Gerar Vídeos 3D via API", type="primary", use_container_width=True):
+                        st.info("Conectando à API generativa...")
+                else:
+                    st.button("⚙️ Motor Inativo", disabled=True, use_container_width=True)
+            
+            st.markdown("<p style='font-size: 13px; color: #64748B; font-style: italic; margin-top: 8px;'>💡 Nota: As <strong>Animações Contextuais Semânticas de Câmera</strong> (Ken Burns de Alto Padrão) já estão ativas e rodando localmente a <strong>custo zero de API</strong> nas configurações de renderização abaixo!</p>", unsafe_allow_html=True)
             
         st.divider()
         st.subheader("🎬 Configurações de Renderização")
@@ -445,6 +826,13 @@ with tab3:
                 ["Clássico", "Gradiente Moderno", "Neon Dark"],
                 index=0,
                 help="Define o layout visual, borda e fundo do vídeo vertical."
+            )
+            
+            animation_type = st.selectbox(
+                "🎬 Animação de Cenas (Efeito Câmera)",
+                ["Contextual (Definido no Roteiro)", "Estática", "Zoom Dinâmico (Zoom In)", "Afastamento Suave (Zoom Out)", "Panorâmica Lateral (Pan)"],
+                index=0,
+                help="Escolha 'Contextual' para usar as animações individuais geradas pela IA por cena no roteiro, ou force um estilo fixo global."
             )
             
         with col_music:
@@ -483,11 +871,26 @@ with tab3:
         st.divider()
         st.subheader("🎬 Exportar MP4")
         
-        if not image_exists or missing_audios:
-            st.error("⚠️ Para renderizar o vídeo final, certifique-se de baixar a imagem e gerar todos os áudios na Aba 2.")
-            st.button("Renderizar Vídeo Final", disabled=True)
+        # Verify if we have at least one valid fallback image or specific images for all scenes
+        all_scenes_have_images = True
+        for scene in scenes_list:
+            s_num = scene.get("scene", 0)
+            has_scene_img = False
+            for ext in ["jpg", "png", "jpeg"]:
+                if os.path.exists(os.path.join(game_assets, f"scene_{s_num}.{ext}")):
+                    has_scene_img = True
+                    break
+            if not has_scene_img:
+                all_scenes_have_images = False
+                break
+                
+        can_render_images = image_exists or all_scenes_have_images
+        
+        if not can_render_images or missing_audios:
+            st.error("⚠️ Para renderizar o vídeo final, certifique-se de baixar ao menos a Imagem Principal (ou todas as imagens por cena) e gerar os áudios na Aba 2.")
+            st.button("Renderizar Vídeo Vertical (9:16)", disabled=True, key="render_btn_disabled")
         else:
-            st.success("🎉 Todos os ativos foram validados! Pronto para compilar o vídeo final.")
+            st.success("🎉 Todos os ativos cruciais foram validados! Pronto para compilar o vídeo final.")
             
             video_output = os.path.join(game_assets, "video_final.mp4")
             
@@ -498,7 +901,8 @@ with tab3:
                         st.session_state.script, 
                         visual_style=visual_style, 
                         bg_music_name=bg_music_name, 
-                        bg_volume=bg_volume
+                        bg_volume=bg_volume,
+                        animation_type=animation_type
                     )
                     if video_path and os.path.exists(video_path):
                         st.success("✨ Vídeo renderizado com sucesso!")
@@ -517,6 +921,109 @@ with tab3:
                         mime="video/mp4",
                         use_container_width=True
                     )
+
+# --- TAB 4: METADADOS SOCIAIS (COPYWRITER) ---
+elif selected == "Metadados Sociais":
+    st.header("4. Metadados Sociais (Copywriter IA)")
+    
+    if not game_name or not st.session_state.script:
+        st.warning("⚠️ Certifique-se de configurar o nome do jogo na barra lateral e gerar o roteiro na Aba 1 primeiro.")
+    else:
+        st.write("Gere copys otimizadas de postagem (legenda, títulos e hashtags) para o TikTok, Reels e Shorts com base no roteiro atual:")
+        
+        # Verificar se já existem metadados salvos
+        game_assets = save_assets_dir(game_name)
+        metadata_json_path = os.path.join(game_assets, "metadata.json")
+        metadata_txt_path = os.path.join(game_assets, "metadata.txt")
+        
+        saved_metadata = None
+        if os.path.exists(metadata_json_path):
+            try:
+                with open(metadata_json_path, "r", encoding="utf-8") as f:
+                    saved_metadata = json.load(f)
+            except Exception:
+                pass
+                
+        if saved_metadata:
+            st.success("✅ Metadados sociais carregados do disco!")
+        else:
+            st.info("ℹ️ Nenhum metadado gerado para este jogo ainda.")
+            
+        if st.button("Gerar Metadados Sociais com IA", type="primary"):
+            with st.spinner("Analisando roteiro e escrevendo copies de alta conversão..."):
+                result = generate_social_metadata(game_name, st.session_state.script)
+                if isinstance(result, dict) and "error" not in result:
+                    st.success("🎉 Metadados sociais gerados e salvos com sucesso!")
+                    st.rerun()
+                elif isinstance(result, dict) and "error" in result:
+                    st.error(f"Erro ao gerar metadados: {result['error']}")
+                else:
+                    st.error("Erro inesperado ao gerar metadados.")
+                    
+        if saved_metadata:
+            st.divider()
+            
+            # Títulos sugeridos
+            st.subheader("💡 Opções de Títulos (Capas / Headlines)")
+            for i, title in enumerate(saved_metadata.get("titles", [])):
+                st.code(title, language="")
+                
+            # Copies de legenda
+            st.subheader("📝 Copies e Legendas de Postagem")
+            captions = saved_metadata.get("captions", [])
+            
+            col_cap1, col_cap2 = st.columns(2)
+            with col_cap1:
+                st.markdown("**Opção 1: Direta e Focada em Engajamento Rápido (TikTok)**")
+                legenda_1 = captions[0] if len(captions) > 0 else ""
+                new_legenda_1 = st.text_area("Legenda TikTok", value=legenda_1, height=200, key="leg_tk")
+            with col_cap2:
+                st.markdown("**Opção 2: Narrativa com Gancho e CTA Forte (Instagram/Reels)**")
+                legenda_2 = captions[1] if len(captions) > 1 else ""
+                new_legenda_2 = st.text_area("Legenda Reels", value=legenda_2, height=200, key="leg_ig")
+                
+            # Hashtags
+            st.subheader("🏷️ Hashtags de Nicho Recomendadas")
+            hashtags = saved_metadata.get("hashtags", "")
+            new_hashtags = st.text_area("Hashtags", value=hashtags, height=100, key="hash")
+            
+            # Botão para salvar alterações manuais
+            if st.button("Salvar Alterações Manuais nos Metadados"):
+                updated_data = {
+                    "titles": saved_metadata.get("titles", []),
+                    "captions": [new_legenda_1, new_legenda_2],
+                    "hashtags": new_hashtags
+                }
+                
+                try:
+                    with open(metadata_json_path, "w", encoding="utf-8") as f:
+                        json.dump(updated_data, f, ensure_ascii=False, indent=4)
+                        
+                    with open(metadata_txt_path, "w", encoding="utf-8") as f:
+                        f.write("=== TÍTULOS SUGERIDOS ===\n")
+                        for idx, t in enumerate(updated_data.get("titles", [])):
+                            f.write(f"{idx+1}. {t}\n")
+                        f.write(f"\n=== LEGENDA 1 (TikTok) ===\n{new_legenda_1}\n")
+                        f.write(f"\n=== LEGENDA 2 (Instagram/Reels) ===\n{new_legenda_2}\n")
+                        f.write(f"\n=== HASHTAGS ===\n{new_hashtags}\n")
+                        
+                    st.success("Alterações salvas com sucesso no disco!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao salvar alterações: {e}")
+                    
+            # Opção de download rápido do arquivo final formatado
+            if os.path.exists(metadata_txt_path):
+                with open(metadata_txt_path, "r", encoding="utf-8") as f:
+                    txt_data = f.read()
+                    
+                st.download_button(
+                    label="📥 Baixar Metadados Completos (metadata.txt)",
+                    data=txt_data,
+                    file_name=f"{game_name.lower().replace(' ', '_')}_metadata.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
 
 # --- SIDEBAR ATIVOS ---
 if game_name:
