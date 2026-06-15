@@ -33,43 +33,100 @@ def extract_text_from_pdf(pdf_path):
         print(f"Erro ao ler PDF: {e}")
     return text
 
-def generate_script(game_name, manual_text, video_level):
-    """Gera um roteiro de vídeo usando o OpenRouter."""
+# Tipos de conteúdo suportados pela fábrica de vídeos. Cada preset ajusta a
+# persona, o tom e o tipo de imagem que a IA deve descrever para cada cena,
+# permitindo gerar roteiros para QUALQUER tema (não apenas jogos de tabuleiro).
+CONTENT_TYPES = {
+    "Jogos de Tabuleiro & Cartas": {
+        "persona": "roteirista especializado em jogos de tabuleiro e cartas",
+        "visual_hint": "um componente, carta, peça, tabuleiro ou cena real do jogo",
+        "tone": "tom empolgante, ágil e didático, despertando curiosidade sobre as mecânicas e componentes do jogo",
+    },
+    "Educacional & Curiosidades": {
+        "persona": "roteirista especializado em conteúdo educacional e curiosidades virais",
+        "visual_hint": "uma imagem, ilustração, lugar, objeto ou cena que represente visualmente o fato ou conceito explicado",
+        "tone": "tom curioso e surpreendente, no estilo 'você sabia', prendendo a atenção a cada novo fato",
+    },
+    "Tutorial & Passo a Passo": {
+        "persona": "roteirista especializado em tutoriais e conteúdo prático (how-to)",
+        "visual_hint": "a etapa, ferramenta, ingrediente, tela ou ação relacionada a este passo específico",
+        "tone": "tom claro, direto e prático, guiando o espectador passo a passo até o resultado final",
+    },
+    "Resenha & Reviews": {
+        "persona": "roteirista especializado em resenhas e reviews de produtos, apps e serviços",
+        "visual_hint": "o produto, embalagem, detalhe, tela ou comparação relevante para este ponto da análise",
+        "tone": "tom analítico, honesto e envolvente, destacando prós, contras, detalhes e veredito",
+    },
+    "Histórias & Narrativas": {
+        "persona": "roteirista especializado em storytelling e narrativas curtas",
+        "visual_hint": "a cena, personagem, lugar ou objeto central deste momento da história",
+        "tone": "tom narrativo e envolvente, com ganchos de curiosidade, suspense ou emoção entre as cenas",
+    },
+    "Listas & Rankings": {
+        "persona": "roteirista especializado em listas, rankings e contagens (Top 5, Top 10) virais",
+        "visual_hint": "a imagem que melhor representa o item, lugar ou fato apresentado nesta posição do ranking",
+        "tone": "tom dinâmico, impactante e cheio de ritmo, ideal para contagens regressivas",
+    },
+    "Customizado / Geral": {
+        "persona": "roteirista versátil especializado em vídeos curtos para redes sociais",
+        "visual_hint": "uma imagem real e fiel que represente o que está sendo narrado nesta cena",
+        "tone": "tom envolvente, adaptado ao tema apresentado",
+    },
+}
+
+# Níveis de profundidade do roteiro (substituem os antigos níveis "de jogador"
+# por algo aplicável a qualquer tipo de vídeo).
+DEPTH_LEVELS = {
+    "Resumido": "Crie um roteiro curto e direto ao ponto, com no máximo 4 cenas, ideal para vídeos de até 30 segundos.",
+    "Detalhado": "Crie um roteiro equilibrado, com 5 a 6 cenas, ideal para vídeos de cerca de 45 a 60 segundos.",
+    "Aprofundado": "Crie um roteiro mais completo, com 6 a 8 cenas, explorando mais detalhes e nuances do tema, ideal para vídeos de até 90 segundos.",
+}
+
+def generate_script(project_name, source_text="", content_type="Customizado / Geral", depth_level="Detalhado"):
+    """Gera um roteiro de vídeo sobre QUALQUER tema usando o OpenRouter."""
     if not OPENROUTER_API_KEY:
         return "Erro: OPENROUTER_API_KEY não configurada no arquivo .env"
 
+    preset = CONTENT_TYPES.get(content_type, CONTENT_TYPES["Customizado / Geral"])
+    depth_instruction = DEPTH_LEVELS.get(depth_level, DEPTH_LEVELS["Detalhado"])
+
+    if source_text and source_text.strip():
+        context_block = f"Use o material de referência abaixo como base factual principal para o roteiro:\n\n{source_text}"
+    else:
+        context_block = "Nenhum material de referência foi fornecido. Utilize seu próprio conhecimento sobre o tema para criar um roteiro factualmente correto, relevante e interessante."
+
     prompt = f"""
-    Você é um roteirista especializado em boardgames e vídeos curtos (TikTok/Reels/Shorts).
-    Objetivo: Criar um roteiro para um vídeo de 60 segundos sobre o jogo "{game_name}".
-    Nível do público: {video_level}
-    
-    Contexto (Manual do Jogo):
-    {manual_text}
-    
+    Você é um {preset['persona']}, criando roteiros para vídeos verticais curtos (TikTok/Reels/Shorts).
+    Tema do vídeo: "{project_name}"
+    {depth_instruction}
+    Escreva com um {preset['tone']}.
+
+    {context_block}
+
     Instruções:
-    1. O roteiro deve ser dividido em cenas (máximo 6 cenas).
+    1. Divida o roteiro em cenas numeradas sequencialmente, na quantidade indicada acima.
     2. Cada cena deve ter as seguintes chaves JSON exatas:
        - 'scene': o número da cena (1, 2, 3...)
-       - 'narration': O texto falado na narração (em português, tom altamente empolgante e explicativo).
-       - 'visual': Descrição do componente real do jogo que deve aparecer nessa cena.
-       - 'animation': O tipo de movimento de câmera ideal baseado semanticamente na narração da cena. Escolha estritamente entre uma dessas 4 opções de string:
-         * "Zoom Dinâmico (Zoom In)": Use para focar em componentes específicos, dar zoom em detalhes do tabuleiro, ou apresentar componentes novos citados na narração.
-         * "Afastamento Suave (Zoom Out)": Use para introduções de jogo (revelando a caixa inteira), conclusões ou planos de visão geral de setup do tabuleiro.
-         * "Panorâmica Lateral (Pan)": Use para varrer uma mesa de componentes, fileiras de cartas dispostas, ou progressão de regras.
+       - 'narration': o texto falado na narração (em português do Brasil).
+       - 'visual': descrição de {preset['visual_hint']}. Esta descrição será usada depois para buscar uma imagem real na web, então seja específico e descritivo.
+       - 'animation': o tipo de movimento de câmera ideal baseado semanticamente na narração da cena. Escolha estritamente entre uma dessas 4 opções de string:
+         * "Zoom Dinâmico (Zoom In)": Use para focar em detalhes, apresentar algo novo ou destacar um ponto importante.
+         * "Afastamento Suave (Zoom Out)": Use para introduções, conclusões ou planos gerais.
+         * "Panorâmica Lateral (Pan)": Use para varrer uma cena com múltiplos elementos ou mostrar progressão.
          * "Estática": Use quando não houver necessidade de movimento de câmera.
-    
+
     Exemplo de formato esperado:
     {{
       "scenes": [
         {{
           "scene": 1,
-          "visual": "Caixa do jogo Catan sendo revelada na mesa",
-          "narration": "Você está pronto para colonizar a ilha mais famosa dos tabuleiros?",
+          "visual": "Descrição visual real e específica da cena 1",
+          "narration": "Texto narrado da cena 1",
           "animation": "Afastamento Suave (Zoom Out)"
         }}
       ]
     }}
-    
+
     Retorne APENAS o JSON válido estruturado de acordo com o exemplo acima.
     """
 
@@ -80,13 +137,13 @@ def generate_script(game_name, manual_text, video_level):
                 url="https://openrouter.ai/api/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "HTTP-Referer": "https://github.com/gemini-cli/fabricadevideos",
+                    "HTTP-Referer": "https://github.com/carlosferian/fabricadevideos",
                     "X-OpenRouter-Title": "Fabrica de Videos",
                 },
                 data=json.dumps({
                     "model": "openrouter/auto",
                     "messages": [
-                        {"role": "system", "content": "Você é um assistente especializado em criar roteiros de vídeos de jogos. Responda APENAS com o JSON."},
+                        {"role": "system", "content": "Você é um assistente especializado em criar roteiros de vídeos curtos para redes sociais sobre QUALQUER tema. Responda APENAS com o JSON."},
                         {"role": "user", "content": prompt}
                     ]
                 })
@@ -163,18 +220,18 @@ def get_bgg_game_images(bgg_id_or_url):
         print(f"Erro ao buscar imagem via BGG API: {e}")
         return None
 
-def save_assets_dir(game_name):
-    """Cria o diretório de assets para o jogo."""
-    path = os.path.join("assets", game_name.lower().replace(" ", "_"))
+def save_assets_dir(project_name):
+    """Cria o diretório de assets para o projeto."""
+    path = os.path.join("assets", project_name.lower().replace(" ", "_"))
     os.makedirs(path, exist_ok=True)
     return path
 
-def download_image(url, game_name, filename):
+def download_image(url, project_name, filename):
     """Faz o download de uma imagem para a pasta de assets."""
     if not url:
         return None
     try:
-        dest_dir = save_assets_dir(game_name)
+        dest_dir = save_assets_dir(project_name)
         path = os.path.join(dest_dir, filename)
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -297,34 +354,18 @@ def run_generate_multiple_audios(tasks_list):
         print(f"Erro ao gerar áudios em lote paralelo: {e}")
         return False
 
-def search_game_images_ddg(query, max_results=5):
+def search_images_web(query, max_results=5, boost_terms=None, block_terms=None):
     """
-    Busca imagens na web (via Bing Image Search) de forma extremamente robusta e inteligente,
-    utilizando normalização de acentos, múltiplas variações de consulta sob o capô,
-    filtro rigoroso contra bancos comerciais e pontuação de relevância heurística.
+    Busca imagens na web (via Bing Image Search) com pontuação de relevância
+    baseada na correspondência das palavras da consulta original, com suporte
+    opcional a termos de priorização e bloqueio definidos pelo usuário.
+    Funciona para qualquer tema/nicho de vídeo, não apenas jogos de tabuleiro.
     """
     import urllib.parse
     import requests
     import re
     import html
     import unicodedata
-
-    # Termos positivos para impulsionar a pontuação de board games
-    BOARD_GAME_TERMS = [
-        "jogo", "tabuleiro", "boardgame", "board game", "estrela", "monopoly", 
-        "brinquedo", "caixa", "peças", "cartas", "manual", "gameplay", "peça", 
-        "dados", "play", "divertido", "infantil"
-    ]
-
-    # Termos bancários e logotipos comerciais para penalizar fortemente ou bloquear
-    BANKING_TERMS = [
-        "banesco", "bancodevenezuela", "bolivariano", "bancolombia", "pichincha", 
-        "guayaquil", "bancaribe", "banplus", "bancamiga", "mercantil", "provincial",
-        "banco de venezuela", "banco de ecuador", "banco central", "ahorro", "crédito",
-        "credito", "finanças", "finanzas", "dinero", "money", "currency", "dolar",
-        "dólar", "economista", "logos de bancos", "bank logo", "banca", "cooperativa",
-        "banco de españa", "banco de bogota", "banco de occidente", "banco popular"
-    ]
 
     def normalize_text(text):
         """Normaliza o texto: remove acentos e converte para minúsculas."""
@@ -337,34 +378,40 @@ def search_game_images_ddg(query, max_results=5):
         return normalized.lower().strip()
 
     def score_result(title, url, original_query):
-        """Calcula uma pontuação de relevância baseada em heurísticas para o resultado."""
+        """Calcula uma pontuação de relevância com base na consulta e nos filtros do usuário."""
         norm_title = normalize_text(title)
         norm_url = normalize_text(url)
         norm_query = normalize_text(original_query)
-        
+
         score = 0
-        
-        # 1. Palavras principais da busca: se o título contém palavras chaves da busca core
-        core_query_words = [w for w in norm_query.split() if w not in ["board", "game", "boardgame", "jogo", "de", "tabuleiro"]]
+
+        # 1. Palavras da busca presentes no título ou na URL do resultado
+        core_query_words = [w for w in norm_query.split() if len(w) > 2]
         for w in core_query_words:
-            if len(w) > 2 and w in norm_title:
+            if w in norm_title:
                 score += 15
-                
-        # 2. Impulsionamento por termos de board game
-        for term in BOARD_GAME_TERMS:
-            if term in norm_title or term in norm_url:
-                score += 10
-                
-        # 3. Penalização severa de bancos comerciais e logotipos genéricos
-        for term in BANKING_TERMS:
-            if term in norm_title or term in norm_url:
-                score -= 100
-                
-        # 4. Impulsionamento por lojas de brinquedos ou e-commerce conhecidos
-        for shop in ["magazineluiza", "mlcdn", "mercadolivre", "estrela.com.br", "amazon", "shopee", "casasbahia", "pontofrio"]:
+            if w in norm_url:
+                score += 5
+
+        # 2. Termos de priorização definidos pelo usuário (opcional)
+        if boost_terms:
+            for term in boost_terms:
+                norm_term = normalize_text(term)
+                if norm_term and (norm_term in norm_title or norm_term in norm_url):
+                    score += 12
+
+        # 3. Termos de bloqueio definidos pelo usuário (opcional)
+        if block_terms:
+            for term in block_terms:
+                norm_term = normalize_text(term)
+                if norm_term and (norm_term in norm_title or norm_term in norm_url):
+                    score -= 100
+
+        # 4. Pequeno impulso para lojas/marketplaces conhecidos (geralmente fotos de produto limpas)
+        for shop in ["amazon", "shopee", "mercadolivre", "magazineluiza", "etsy", "ebay", "aliexpress", "mlcdn"]:
             if shop in norm_url:
-                score += 20
-                
+                score += 5
+
         return score
 
     def search_bing_single(q):
@@ -376,7 +423,7 @@ def search_game_images_ddg(query, max_results=5):
             "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
             "Referer": "https://www.bing.com/"
         }
-        
+
         results = []
         try:
             response = requests.get(url, headers=headers, timeout=10)
@@ -389,11 +436,11 @@ def search_game_images_ddg(query, max_results=5):
                         murl_match = re.search(r'"murl":"([^"]+)"', m_clean)
                         turl_match = re.search(r'"turl":"([^"]+)"', m_clean)
                         label_match = re.search(r'aria-label="([^"]+)"', tag)
-                        
-                        title = "Imagem do Jogo"
+
+                        title = "Imagem"
                         if label_match:
                             title = label_match.group(1).replace("Resultado de imagem para ", "").replace("Image result for ", "")
-                            
+
                         if murl_match:
                             img_url = murl_match.group(1)
                             thumb_url = turl_match.group(1) if turl_match else img_url
@@ -407,44 +454,24 @@ def search_game_images_ddg(query, max_results=5):
         return results
 
     print(f"Buscando imagens para: '{query}' via motor de busca inteligente...")
-    
-    # 1. Gerar variações da busca
-    variations = [query]
-    
-    # Remover sufixos em inglês/gerais para ver se melhora buscas locais em português
-    clean_q = query
-    for suffix in ["board game", "boardgame", "jogo de tabuleiro", "jogo"]:
-        clean_q = re.sub(rf"\b{suffix}\b", "", clean_q, flags=re.IGNORECASE).strip()
-    
-    if clean_q and clean_q.lower() != query.lower():
-        variations.append(clean_q)
-        
-    # Tratamento especial para o Banco Imobiliário (Monopoly Brasil)
-    norm_query = normalize_text(query)
-    if "banco imobiliario" in norm_query:
-        variations.append("banco imobiliario")
-        variations.append("Monopoly Brasil")
-        
-    # 2. Executar as buscas de todas as variações e pontuar
-    all_raw_results = []
+
+    results_raw = search_bing_single(query)
+
+    scored_results = []
     seen_urls = set()
-    
-    for var in variations:
-        res = search_bing_single(var)
-        for item in res:
-            url = item["main_image"]
-            if url not in seen_urls:
-                seen_urls.add(url)
-                score = score_result(item["title"], url, query)
-                item["score"] = score
-                all_raw_results.append(item)
-                
-    # 3. Ordenar resultados por relevância (pontuação descendente) e remover penalizados (<0)
-    all_raw_results.sort(key=lambda x: x["score"], reverse=True)
-    filtered_results = [item for item in all_raw_results if item["score"] >= 0]
-    
-    print(f"Busca inteligente concluída. Resultados brutos: {len(all_raw_results)}, Filtrados e validados: {len(filtered_results)}")
-    
+    for item in results_raw:
+        url = item["main_image"]
+        if url not in seen_urls:
+            seen_urls.add(url)
+            item["score"] = score_result(item["title"], url, query)
+            scored_results.append(item)
+
+    # Ordena por relevância (pontuação descendente) e remove resultados bloqueados (<0)
+    scored_results.sort(key=lambda x: x["score"], reverse=True)
+    filtered_results = [item for item in scored_results if item["score"] >= 0]
+
+    print(f"Busca concluída. Resultados brutos: {len(results_raw)}, Filtrados e validados: {len(filtered_results)}")
+
     return filtered_results[:max_results]
 
 def wrap_text(text, font, max_width, draw):
@@ -544,7 +571,50 @@ def round_corners(image, radius=30):
     result.paste(image, (0, 0), mask=mask)
     return result
 
-def create_scene_frame(image_path, text, scene_num, game_name, width=1080, height=1920, visual_style="Clássico"):
+def ensure_default_font():
+    """Garante que uma fonte TTF de alta qualidade esteja disponível para as legendas dos vídeos."""
+    fonts_dir = os.path.join("assets", "fonts")
+    os.makedirs(fonts_dir, exist_ok=True)
+    font_path = os.path.join(fonts_dir, "Poppins-Bold.ttf")
+
+    if not os.path.exists(font_path):
+        try:
+            url = "https://github.com/google/fonts/raw/main/ofl/poppins/Poppins-Bold.ttf"
+            response = requests.get(url, timeout=30)
+            if response.status_code == 200:
+                with open(font_path, "wb") as f:
+                    f.write(response.content)
+                print(f"Fonte: {font_path} baixada com sucesso.")
+        except Exception as e:
+            print(f"Fonte: erro ao baixar fonte padrão: {e}")
+
+    return font_path if os.path.exists(font_path) else None
+
+def get_caption_font(size=42):
+    """
+    Retorna a fonte TrueType usada nas legendas dos vídeos, com fallback em
+    cascata para garantir boa legibilidade em qualquer sistema operacional
+    (Windows, Linux/servidores em nuvem, macOS).
+    """
+    candidates = []
+    downloaded_font = ensure_default_font()
+    if downloaded_font:
+        candidates.append(downloaded_font)
+    candidates.extend([
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "arial.ttf",
+        "Arial Bold.ttf",
+        "calibri.ttf",
+        "segoeui.ttf",
+    ])
+    for candidate in candidates:
+        try:
+            return ImageFont.truetype(candidate, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+def create_scene_frame(image_path, text, scene_num, project_name, width=1080, height=1920, visual_style="Clássico"):
     """
     Cria um frame de vídeo vertical (9:16) com o estilo visual configurado,
     imagem original centralizada e legenda formatada.
@@ -655,18 +725,9 @@ def create_scene_frame(image_path, text, scene_num, game_name, width=1080, heigh
 
     # --- 3. LEGENDAS ---
     draw = ImageDraw.Draw(bg)
-    
-    font = None
-    for font_name in ["arial.ttf", "calibri.ttf", "segoeui.ttf"]:
-        try:
-            font = ImageFont.truetype(font_name, 38)
-            break
-        except Exception:
-            continue
-            
-    if font is None:
-        font = ImageFont.load_default()
-        
+
+    font = get_caption_font(38)
+
     box_w = width - 120
     box_padding = 30
     text_max_w = box_w - (2 * box_padding)
@@ -724,12 +785,12 @@ def create_scene_frame(image_path, text, scene_num, game_name, width=1080, heigh
         draw_final.text((line_x, current_y), line, font=font, fill="white")
         current_y += line_height + line_spacing
         
-    dest_dir = save_assets_dir(game_name)
+    dest_dir = save_assets_dir(project_name)
     temp_frame_path = os.path.join(dest_dir, f"temp_frame_{scene_num}.jpg")
     bg.convert("RGB").save(temp_frame_path, "JPEG")
     return temp_frame_path
 
-def create_animated_scene_clip(image_path, text, scene_num, game_name, duration, width=1080, height=1920, visual_style="Clássico", animation_type="Zoom Dinâmico (Zoom In)"):
+def create_animated_scene_clip(image_path, text, scene_num, project_name, duration, width=1080, height=1920, visual_style="Clássico", animation_type="Zoom Dinâmico (Zoom In)"):
     """
     Gera um VideoClip da MoviePy para a cena, aplicando efeitos de animação local
     como Ken Burns (Zoom In, Zoom Out, Pan) processados em tempo real na memória.
@@ -779,16 +840,8 @@ def create_animated_scene_clip(image_path, text, scene_num, game_name, duration,
     # --- 2. PREPARAR TEXTO/LEGENDA E TEXTO OVERLAY ---
     overlay_static = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw_overlay = ImageDraw.Draw(overlay_static)
-    
-    font = None
-    for font_name in ["arial.ttf", "calibri.ttf", "segoeui.ttf"]:
-        try:
-            font = ImageFont.truetype(font_name, 38)
-            break
-        except Exception:
-            continue
-    if font is None:
-        font = ImageFont.load_default()
+
+    font = get_caption_font(38)
 
     box_w = width - 120
     box_padding = 30
@@ -924,18 +977,18 @@ def create_animated_scene_clip(image_path, text, scene_num, game_name, duration,
 
     return VideoClip(get_frame, duration=duration)
 
-def render_video(game_name, script, visual_style="Clássico", bg_music_name="Sem Música", bg_volume=0.15, animation_type="Estática"):
+def render_video(project_name, script, visual_style="Clássico", bg_music_name="Sem Música", bg_volume=0.15, animation_type="Estática"):
     """
-    Renderiza o vídeo final a partir da imagem do jogo e os áudios das cenas.
+    Renderiza o vídeo final a partir das imagens do projeto e dos áudios das cenas.
     Permite mixar música de fundo (BGM), aplicar estilos visuais diferenciados e animações locais.
-    Salva em assets/{game_name}/video_final.mp4.
+    Salva em assets/{project_name}/video_final.mp4.
     Retorna o caminho do vídeo gerado ou None se houver erro.
     """
     # Garante que as músicas de fundo padrão estejam disponíveis
     ensure_default_bg_music()
     
-    dest_dir = save_assets_dir(game_name)
-    image_path = os.path.join(dest_dir, "main_game.jpg")
+    dest_dir = save_assets_dir(project_name)
+    image_path = os.path.join(dest_dir, "main_image.jpg")
     
     if not os.path.exists(image_path):
         print(f"Erro: imagem principal {image_path} não encontrada.")
@@ -974,7 +1027,7 @@ def render_video(game_name, script, visual_style="Clássico", bg_music_name="Sem
             
             if current_anim == "Estática" or current_anim == "":
                 # Modo clássico estático - gera frame JPG temporário
-                temp_frame = create_scene_frame(current_image_path, narration, scene_num, game_name, visual_style=visual_style)
+                temp_frame = create_scene_frame(current_image_path, narration, scene_num, project_name, visual_style=visual_style)
                 temp_frames.append(temp_frame)
                 scene_clip = ImageClip(temp_frame).with_duration(duration)
             else:
@@ -983,7 +1036,7 @@ def render_video(game_name, script, visual_style="Clássico", bg_music_name="Sem
                     image_path=current_image_path,
                     text=narration,
                     scene_num=scene_num,
-                    game_name=game_name,
+                    project_name=project_name,
                     duration=duration,
                     visual_style=visual_style,
                     animation_type=current_anim
@@ -1072,12 +1125,12 @@ def render_video(game_name, script, visual_style="Clássico", bg_music_name="Sem
             except Exception as e:
                 print(f"Erro ao remover frame temporário {temp_f}: {e}")
 
-def save_script_to_file(game_name, script):
-    """Salva o JSON do roteiro na pasta de assets do jogo."""
-    if not game_name or not script:
+def save_script_to_file(project_name, script):
+    """Salva o JSON do roteiro na pasta de assets do projeto."""
+    if not project_name or not script:
         return False
     try:
-        dest_dir = save_assets_dir(game_name)
+        dest_dir = save_assets_dir(project_name)
         script_path = os.path.join(dest_dir, "script.json")
         with open(script_path, "w", encoding="utf-8") as f:
             json.dump(script, f, ensure_ascii=False, indent=4)
@@ -1087,12 +1140,12 @@ def save_script_to_file(game_name, script):
         print(f"Erro ao salvar roteiro em arquivo: {e}")
         return False
 
-def load_script_from_file(game_name):
-    """Carrega o roteiro salvo na pasta de assets do jogo."""
-    if not game_name:
+def load_script_from_file(project_name):
+    """Carrega o roteiro salvo na pasta de assets do projeto."""
+    if not project_name:
         return None
     try:
-        dest_dir = save_assets_dir(game_name)
+        dest_dir = save_assets_dir(project_name)
         script_path = os.path.join(dest_dir, "script.json")
         if os.path.exists(script_path):
             with open(script_path, "r", encoding="utf-8") as f:
@@ -1167,15 +1220,15 @@ def extract_images_from_url(url):
         print(f"Erro ao extrair imagens de {url}: {e}")
     return results
 
-def delete_game_assets(game_name, delete_type):
-    """Exclui de forma granular ou total os arquivos gerados de um jogo."""
+def delete_project_assets(project_name, delete_type):
+    """Exclui de forma granular ou total os arquivos gerados de um projeto."""
     import shutil
-    if not game_name:
+    if not project_name:
         return False
     try:
-        dest_dir = save_assets_dir(game_name)
+        dest_dir = save_assets_dir(project_name)
         if delete_type == "all":
-            # Deleta toda a pasta do jogo
+            # Deleta toda a pasta do projeto
             if os.path.exists(dest_dir):
                 shutil.rmtree(dest_dir)
                 print(f"Diretório deletado com sucesso: {dest_dir}")
@@ -1188,8 +1241,8 @@ def delete_game_assets(game_name, delete_type):
                 print("Vídeo excluído com sucesso.")
                 return True
         elif delete_type == "image":
-            # Deleta apenas a imagem principal do jogo
-            img_path = os.path.join(dest_dir, "main_game.jpg")
+            # Deleta apenas a imagem principal do projeto
+            img_path = os.path.join(dest_dir, "main_image.jpg")
             if os.path.exists(img_path):
                 os.remove(img_path)
                 print("Imagem principal excluída com sucesso.")
@@ -1208,16 +1261,19 @@ def delete_game_assets(game_name, delete_type):
             print(f"Excluídos {deleted_count} arquivos de áudios/cenas.")
             return True
     except Exception as e:
-        print(f"Erro ao deletar ativos de tipo '{delete_type}' para o jogo '{game_name}': {e}")
+        print(f"Erro ao deletar ativos de tipo '{delete_type}' para o projeto '{project_name}': {e}")
     return False
 
-def generate_social_metadata(game_name, script):
+def generate_social_metadata(project_name, script, content_type="Customizado / Geral"):
     """
-    Gera títulos, legendas e hashtags com base no roteiro gerado para o jogo.
-    Retorna um dicionário com os campos 'titles', 'captions' e 'hashtags', ou None se falhar.
+    Gera títulos, legendas e hashtags com base no roteiro gerado, adaptados ao
+    tipo de conteúdo selecionado (jogos, educacional, tutorial, resenha, etc).
+    Retorna um dicionário com os campos 'titles', 'captions' e 'hashtags', ou um erro.
     """
     if not OPENROUTER_API_KEY:
         return {"error": "OPENROUTER_API_KEY não configurada no arquivo .env"}
+
+    preset = CONTENT_TYPES.get(content_type, CONTENT_TYPES["Customizado / Geral"])
 
     # Formata o roteiro para texto legível
     script_text = ""
@@ -1228,19 +1284,19 @@ def generate_social_metadata(game_name, script):
         script_text += f"Cena {s_num}:\n- Visual: {s_vis}\n- Locução: {s_nar}\n\n"
 
     prompt = f"""
-    Você é um Copywriter e Especialista em Redes Sociais altamente estratégico para canais de Board Games.
-    Com base no roteiro do vídeo abaixo sobre o jogo "{game_name}", gere ideias altamente engajadoras de metadados sociais para publicação no TikTok, Instagram Reels e YouTube Shorts.
+    Você é um Copywriter e Especialista em Redes Sociais altamente estratégico, com foco em {preset['persona']}.
+    Com base no roteiro do vídeo abaixo sobre o tema "{project_name}", gere ideias altamente engajadoras de metadados sociais para publicação no TikTok, Instagram Reels e YouTube Shorts.
 
     Roteiro do Vídeo:
     {script_text}
 
     Instruções:
-    1. Gere 3 opções de Títulos extremamente chamativos e curtos (máximo 80 caracteres), com gatilhos de curiosidade ou diversão.
+    1. Gere 3 opções de Títulos extremamente chamativos e curtos (máximo 80 caracteres), com gatilhos de curiosidade ou diversão, adequados ao tema do vídeo.
     2. Gere 2 opções de Legendas (Copys) para postagem:
        - Opção 1: Direta e focada em engajamento rápido (ideal para TikTok).
-       - Opção 2: Narrativa, com um breve gancho, chamada para ação (CTA) como "Marque o amigo" ou "Comente o que achou", ideal para Reels.
-    3. Gere um bloco estratégico com cerca de 10 Hashtags de nicho (ex: #boardgames, #jogosdetabuleiro, #dicasdejogos) e do próprio jogo.
-    
+       - Opção 2: Narrativa, com um breve gancho e chamada para ação (CTA) como "Salve para depois" ou "Comente o que achou", ideal para Reels.
+    3. Gere um bloco estratégico com cerca de 10 Hashtags de nicho relevantes para o tema "{project_name}" e para o tipo de conteúdo do vídeo, misturando hashtags específicas do tema com hashtags amplas de redes sociais (ex: #viral, #foryou, #shorts).
+
     Retorne a resposta APENAS como um objeto JSON válido no formato abaixo, sem formatação markdown ou blocos de código (ex: não inclua ```json):
     {{
         "titles": ["Título 1", "Título 2", "Título 3"],
@@ -1254,13 +1310,13 @@ def generate_social_metadata(game_name, script):
             url="https://openrouter.ai/api/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "HTTP-Referer": "https://github.com/gemini-cli/fabricadevideos",
+                "HTTP-Referer": "https://github.com/carlosferian/fabricadevideos",
                 "X-OpenRouter-Title": "Fabrica de Videos",
             },
             data=json.dumps({
                 "model": "openrouter/auto",
                 "messages": [
-                    {"role": "system", "content": "Você é um redator de mídias sociais especializado em jogos de tabuleiro. Responda APENAS com o JSON."},
+                    {"role": "system", "content": "Você é um redator de mídias sociais especializado em vídeos curtos para qualquer nicho. Responda APENAS com o JSON."},
                     {"role": "user", "content": prompt}
                 ]
             }),
@@ -1275,8 +1331,8 @@ def generate_social_metadata(game_name, script):
                 content = content.replace("```json", "").replace("```", "").strip()
                 data = json.loads(content)
                 
-                # Grava no arquivo metadata.txt na pasta de assets do jogo
-                dest_dir = save_assets_dir(game_name)
+                # Grava no arquivo metadata.txt na pasta de assets do projeto
+                dest_dir = save_assets_dir(project_name)
                 metadata_path = os.path.join(dest_dir, "metadata.txt")
                 with open(metadata_path, "w", encoding="utf-8") as f:
                     f.write(f"=== TÍTULOS SUGERIDOS ===\n")
