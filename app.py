@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 import json
-from utils import extract_text_from_pdf, generate_script, save_assets_dir, get_bgg_game_images, download_image, run_generate_audio, search_images_web, render_video, save_script_to_file, load_script_from_file, extract_images_from_url, delete_project_assets, generate_social_metadata, CONTENT_TYPES, DEPTH_LEVELS
+from utils import extract_text_from_pdf, generate_script, save_assets_dir, get_bgg_game_images, download_image, run_generate_audio, search_images_web, render_video, save_script_to_file, load_script_from_file, extract_images_from_url, delete_project_assets, generate_social_metadata, create_scene_frame, CONTENT_TYPES, DEPTH_LEVELS
 from streamlit_option_menu import option_menu
 import streamlit_antd_components as sac
 
@@ -224,6 +224,8 @@ if "loaded_project_name" not in st.session_state:
     st.session_state.loaded_project_name = None
 if "last_history_select" not in st.session_state:
     st.session_state.last_history_select = ""
+if "script_version" not in st.session_state:
+    st.session_state.script_version = 0
 
 # --- SIDEBAR (Configurações) ---
 st.sidebar.title("⚙️ Configurações")
@@ -269,6 +271,7 @@ if project_name != st.session_state.loaded_project_name:
         loaded_script = load_script_from_file(project_name)
         if loaded_script:
             st.session_state.script = loaded_script
+            st.session_state.script_version += 1
             st.sidebar.info(f"📂 Roteiro de '{project_name}' carregado do histórico!")
         else:
             st.session_state.script = None
@@ -412,6 +415,7 @@ if selected == "Roteiro":
                         st.session_state.script = script["scenes"]
                     else:
                         st.session_state.script = script
+                    st.session_state.script_version += 1
                     if project_name:
                         save_script_to_file(project_name, st.session_state.script)
                     st.success("Roteiro gerado e persistido no histórico com sucesso!")
@@ -420,35 +424,42 @@ if selected == "Roteiro":
 
         if st.session_state.script:
             st.subheader("📝 Roteiro Editável")
-            edited_script = []
             scenes_list = st.session_state.script
             if isinstance(scenes_list, dict):
                 for key in ["scenes", "roteiro", "cenas", "items"]:
                     if key in scenes_list and isinstance(scenes_list[key], list):
                         scenes_list = scenes_list[key]
                         break
-            
+
             if not isinstance(scenes_list, list):
                 st.error("O formato do roteiro gerado não é uma lista válida.")
             else:
+                total_words = sum(len(scene.get("narration", "").split()) for scene in scenes_list)
+                est_seconds = int(total_words / 2.5)  # ~150 palavras por minuto de narração
+                st.caption(f"📊 {len(scenes_list)} cena(s) · ⏱️ duração estimada da narração: ~{est_seconds // 60}min {est_seconds % 60}s")
+
+                v = st.session_state.script_version
+                anim_options = ["Estática", "Zoom Dinâmico (Zoom In)", "Afastamento Suave (Zoom Out)", "Panorâmica Lateral (Pan)"]
+
+                edited_script = []
+                scene_action = None
+
                 for i, scene in enumerate(scenes_list):
                     s_num = scene.get("scene", scene.get("cena", i + 1))
                     s_visual = scene.get("visual", scene.get("imagem", "Descreva o visual aqui"))
                     s_narration = scene.get("narration", scene.get("texto", scene.get("narracao", "")))
                     s_anim = scene.get("animation", "Zoom Dinâmico (Zoom In)")
-                    
-                    anim_options = ["Estática", "Zoom Dinâmico (Zoom In)", "Afastamento Suave (Zoom Out)", "Panorâmica Lateral (Pan)"]
                     anim_index = anim_options.index(s_anim) if s_anim in anim_options else 1
-                    
-                    with st.expander(f"Cena {s_num}: {s_visual[:50]}...", expanded=True):
+
+                    with st.expander(f"#{i + 1} · Cena {s_num}: {s_visual[:50]}...", expanded=True):
                         col_v, col_n, col_a = st.columns([1.5, 2, 1.2])
-                        new_visual = col_v.text_input(f"Visual {i}", value=s_visual, key=f"vis_{i}")
-                        new_narration = col_n.text_area(f"Narração {i}", value=s_narration, key=f"nar_{i}")
+                        new_visual = col_v.text_input(f"Visual {i}", value=s_visual, key=f"vis_{v}_{i}")
+                        new_narration = col_n.text_area(f"Narração {i}", value=s_narration, key=f"nar_{v}_{i}")
                         new_animation = col_a.selectbox(
                             f"Animação {i}",
                             options=anim_options,
                             index=anim_index,
-                            key=f"anim_{i}",
+                            key=f"anim_{v}_{i}",
                             help="Selecione a animação perfeita para esta cena."
                         )
                         edited_script.append({
@@ -457,16 +468,58 @@ if selected == "Roteiro":
                             "narration": new_narration,
                             "animation": new_animation
                         })
-                
-                if st.button("Salvar Alterações no Roteiro"):
+
+                        ctrl_cols = st.columns([1, 1, 1, 6])
+                        if ctrl_cols[0].button("⬆️", key=f"up_{v}_{i}", disabled=(i == 0), help="Mover cena para cima", use_container_width=True):
+                            scene_action = ("up", i)
+                        if ctrl_cols[1].button("⬇️", key=f"down_{v}_{i}", disabled=(i == len(scenes_list) - 1), help="Mover cena para baixo", use_container_width=True):
+                            scene_action = ("down", i)
+                        if ctrl_cols[2].button("🗑️", key=f"del_{v}_{i}", help="Remover esta cena do roteiro", use_container_width=True):
+                            scene_action = ("delete", i)
+
+                if scene_action:
+                    action, idx = scene_action
+                    if action == "up" and idx > 0:
+                        edited_script[idx - 1], edited_script[idx] = edited_script[idx], edited_script[idx - 1]
+                    elif action == "down" and idx < len(edited_script) - 1:
+                        edited_script[idx + 1], edited_script[idx] = edited_script[idx], edited_script[idx + 1]
+                    elif action == "delete":
+                        edited_script.pop(idx)
+
                     st.session_state.script = edited_script
+                    st.session_state.script_version += 1
                     if project_name:
-                        if save_script_to_file(project_name, edited_script):
-                            st.success("Alterações salvas e persistidas no histórico com sucesso!")
+                        save_script_to_file(project_name, edited_script)
+                    st.rerun()
+
+                st.markdown("---")
+                col_add, col_save = st.columns(2)
+                with col_add:
+                    if st.button("➕ Adicionar Cena", use_container_width=True):
+                        next_scene_num = max([s.get("scene", 0) for s in edited_script], default=0) + 1
+                        edited_script.append({
+                            "scene": next_scene_num,
+                            "visual": "Descreva o visual desta nova cena",
+                            "narration": "",
+                            "animation": "Zoom Dinâmico (Zoom In)"
+                        })
+                        st.session_state.script = edited_script
+                        st.session_state.script_version += 1
+                        if project_name:
+                            save_script_to_file(project_name, edited_script)
+                        st.rerun()
+                with col_save:
+                    if st.button("💾 Salvar Alterações no Roteiro", use_container_width=True, type="primary"):
+                        st.session_state.script = edited_script
+                        if project_name:
+                            if save_script_to_file(project_name, edited_script):
+                                st.success("Alterações salvas e persistidas no histórico com sucesso!")
+                            else:
+                                st.warning("Alterações salvas em memória, mas houve um erro ao persistir no arquivo.")
                         else:
-                            st.warning("Alterações salvas em memória, mas houve um erro ao persistir no arquivo.")
-                    else:
-                        st.success("Alterações salvas com sucesso em memória!")
+                            st.success("Alterações salvas com sucesso em memória!")
+
+                st.caption("💡 Remover uma cena não exclui áudios/imagens já gerados para ela do disco. Adicione uma cena novamente com o mesmo número (Cena N) para reaproveitá-los.")
 
 # --- TAB 2: NARRAÇÃO & IMAGENS ---
 elif selected == "Narração & Imagens":
@@ -837,38 +890,10 @@ elif selected == "Animação & Vídeo":
                 st.caption("Acesse a **Aba 2** e clique em 'Gerar Áudios de Todas as Cenas' para gerá-los.")
         
         st.divider()
-        st.subheader("📹 Efeitos de Vídeo por IA (Image-to-Video)")
-        
-        with st.container():
-            st.markdown("""
-            <div style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: 12px; padding: 1.2rem; margin-bottom: 1.5rem;">
-                <h4 style="color: #818CF8; margin-top: 0px; margin-bottom: 0.5rem; font-family: Outfit, sans-serif; font-size: 16px;">🤖 Animação 3D Generativa de Componentes (Opcional - Fase 3.1)</h4>
-                <p style="font-size: 13.5px; color: #94A3B8; margin-bottom: 0px; line-height: 1.55;">
-                    Esta ferramenta opcional integra APIs externas de inteligência artificial geradora de vídeo (como <strong>Kling AI</strong>, <strong>Luma Dream Machine</strong> ou <strong>Runway Gen-3</strong>) para converter as imagens estáticas dos seus componentes em clipes de vídeo 3D de 4 segundos.
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Form to insert Luma / Kling Key if they want to integrate in the future
-            col_api, col_act = st.columns([2.5, 1])
-            with col_api:
-                kling_key = st.text_input("🔑 Chave de API Kling / Luma (Opcional)", type="password", placeholder="Insira sua API Key para ativar o gerador 3D...", key="kling_api_key")
-            with col_act:
-                # Add vertical spacing
-                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-                if kling_key:
-                    if st.button("🎬 Gerar Vídeos 3D via API", type="primary", use_container_width=True):
-                        st.info("Conectando à API generativa...")
-                else:
-                    st.button("⚙️ Motor Inativo", disabled=True, use_container_width=True)
-            
-            st.markdown("<p style='font-size: 13px; color: #64748B; font-style: italic; margin-top: 8px;'>💡 Nota: As <strong>Animações Contextuais Semânticas de Câmera</strong> (Ken Burns de Alto Padrão) já estão ativas e rodando localmente a <strong>custo zero de API</strong> nas configurações de renderização abaixo!</p>", unsafe_allow_html=True)
-            
-        st.divider()
         st.subheader("🎬 Configurações de Renderização")
-        
+
         col_style, col_music = st.columns(2)
-        
+
         with col_style:
             visual_style = st.selectbox(
                 "🎨 Estilo Visual do Vídeo",
@@ -876,26 +901,26 @@ elif selected == "Animação & Vídeo":
                 index=0,
                 help="Define o layout visual, borda e fundo do vídeo vertical."
             )
-            
+
             animation_type = st.selectbox(
                 "🎬 Animação de Cenas (Efeito Câmera)",
                 ["Contextual (Definido no Roteiro)", "Estática", "Zoom Dinâmico (Zoom In)", "Afastamento Suave (Zoom Out)", "Panorâmica Lateral (Pan)"],
                 index=0,
                 help="Escolha 'Contextual' para usar as animações individuais geradas pela IA por cena no roteiro, ou force um estilo fixo global."
             )
-            
+
         with col_music:
             bg_music_options = ["Sem Música", "Aleatória"]
             bg_music_dir = os.path.join("assets", "bg_music")
-            
+
             # Garante que a pasta existe e baixa se necessário para mostrar na lista
             from utils import ensure_default_bg_music
             ensure_default_bg_music()
-            
+
             if os.path.exists(bg_music_dir):
                 mp3_files = sorted([f for f in os.listdir(bg_music_dir) if f.endswith(".mp3")])
                 bg_music_options.extend(mp3_files)
-                
+
             bg_music_name = st.selectbox(
                 "🎵 Música de Fundo (BGM)",
                 options=bg_music_options,
@@ -903,7 +928,7 @@ elif selected == "Animação & Vídeo":
                 format_func=lambda x: x.replace(".mp3", "").replace("_", " ").title() if x not in ["Sem Música", "Aleatória"] else x,
                 help="Selecione a trilha sonora de fundo livre de direitos autorais."
             )
-        
+
         bg_volume = 0.15
         if bg_music_name != "Sem Música":
             bg_volume_percent = st.slider(
@@ -916,7 +941,52 @@ elif selected == "Animação & Vídeo":
                 help="Recomendado manter entre 10% e 20% para não sobrepor a narração."
             )
             bg_volume = bg_volume_percent / 100.0
-            
+
+        st.divider()
+        st.subheader("👁️ Pré-visualização do Estilo")
+        st.caption("Gere uma prévia instantânea do frame com o estilo, a imagem e a legenda da cena escolhida — sem esperar pela renderização completa do vídeo.")
+
+        preview_options = {}
+        for idx, scene in enumerate(scenes_list):
+            s_num = scene.get("scene", idx + 1)
+            s_vis = scene.get("visual", "Cena")
+            preview_options[f"Cena {s_num}: {s_vis[:40]}"] = scene
+
+        col_prev_sel, col_prev_btn = st.columns([3, 1])
+        with col_prev_sel:
+            preview_label = st.selectbox("Cena para pré-visualizar", options=list(preview_options.keys()), key="preview_scene_select")
+        with col_prev_btn:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            generate_preview = st.button("🖼️ Gerar Prévia", use_container_width=True)
+
+        if generate_preview:
+            preview_scene = preview_options[preview_label]
+            preview_num = preview_scene.get("scene", 0)
+
+            preview_img_path = None
+            for ext in ["jpg", "png", "jpeg"]:
+                candidate = os.path.join(project_assets, f"scene_{preview_num}.{ext}")
+                if os.path.exists(candidate):
+                    preview_img_path = candidate
+                    break
+            if not preview_img_path and image_exists:
+                preview_img_path = os.path.join(project_assets, "main_image.jpg")
+
+            if not preview_img_path:
+                st.error("Nenhuma imagem disponível para esta cena. Baixe ao menos a Imagem Principal na Aba 2 antes de gerar a prévia.")
+            else:
+                with st.spinner("Renderizando prévia do frame..."):
+                    preview_frame_path = create_scene_frame(preview_img_path, preview_scene.get("narration", ""), preview_num, project_name, visual_style=visual_style)
+                    if preview_frame_path and os.path.exists(preview_frame_path):
+                        with open(preview_frame_path, "rb") as f:
+                            preview_bytes = f.read()
+                        os.remove(preview_frame_path)
+                        st.image(preview_bytes, caption=f"Prévia • Estilo: {visual_style}", width=340)
+                    else:
+                        st.error("Não foi possível gerar a prévia do frame.")
+
+        st.caption("💡 As **Animações Contextuais Semânticas de Câmera** (Ken Burns) são aplicadas automaticamente na renderização final, a custo zero de API.")
+
         st.divider()
         st.subheader("🎬 Exportar MP4")
         

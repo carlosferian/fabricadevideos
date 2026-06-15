@@ -91,6 +91,16 @@ O projeto visa automatizar a criação de vídeos curtos verticais (9:16) para r
   * Textos da interface trocados de "jogo"/"Jogo" para "projeto"/"Projeto" (campo "Nome do Projeto / Vídeo", "Restaurar Projeto Existente", limpeza de ativos, etc.).
   * `generate_social_metadata` agora recebe o `content_type` selecionado para gerar hashtags e copies adequadas a qualquer nicho (não apenas jogos).
 
+### ✅ Fase 7 (UX de Edição de Vídeo - Concluída Hoje)
+- **7.1 Gerenciamento de Cenas no Roteiro Editável (Aba 1):**
+  * Cada cena agora tem botões ⬆️/⬇️ para reordenar e 🗑️ para remover, além de "➕ Adicionar Cena" para inserir uma nova cena vazia ao final do roteiro.
+  * Removida uma cena, os arquivos `scene_N.mp3`/`scene_N.jpg` dela permanecem no disco e são reaproveitados se uma cena com o mesmo número for adicionada novamente.
+  * Indicador "📊 N cena(s) · ⏱️ duração estimada da narração" calculado a partir da contagem de palavras (~150 palavras/min).
+  * Corrigido bug latente de estado de widgets: regenerar o roteiro (ou trocar de projeto) com o mesmo número de cenas não atualizava os campos de edição, pois o Streamlit reaproveitava valores antigos em `session_state` pelas mesmas chaves. Agora as chaves dos widgets incluem um contador `script_version`, incrementado sempre que o roteiro é (re)carregado por completo.
+- **7.2 Pré-visualização de Estilo na Renderização (Aba 3):**
+  * Substituído o painel não-funcional "Animação 3D Generativa (Kling/Luma)" — que apenas simulava uma chamada de API sem nenhum efeito real — por "👁️ Pré-visualização do Estilo", que gera instantaneamente o frame de qualquer cena com o estilo visual, imagem e legenda escolhidos via `create_scene_frame`, sem precisar renderizar o vídeo completo.
+  * A seção de Configurações de Renderização (estilo visual, animação, BGM) foi movida para antes da prévia, para que o estilo selecionado seja usado imediatamente na geração do frame de exemplo.
+
 ---
 
 ## 🚀 Próximos Passos & Pendências (Para a Próxima Retomada dos Trabalhos)
