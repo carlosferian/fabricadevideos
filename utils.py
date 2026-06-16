@@ -8,7 +8,7 @@ import edge_tts
 import asyncio
 from dotenv import load_dotenv
 from PIL import Image, ImageFilter, ImageDraw, ImageFont
-from moviepy import ImageClip, AudioFileClip, concatenate_videoclips, VideoClip, concatenate_audioclips
+from moviepy import ImageClip, AudioFileClip, concatenate_videoclips, VideoClip, concatenate_audioclips, VideoFileClip
 
 load_dotenv()
 
@@ -1356,3 +1356,241 @@ def generate_social_metadata(project_name, script, content_type="Customizado / G
     except Exception as e:
         print(f"Erro ao gerar metadados sociais: {e}")
         return {"error": str(e)}
+
+
+# ─── Clip Assembly Pipeline ───────────────────────────────────────────────────
+
+def get_clips_dir(project_name):
+    return os.path.join(save_assets_dir(project_name), "clips")
+
+
+def save_video_clip(file_bytes, filename, project_name):
+    clips_dir = get_clips_dir(project_name)
+    os.makedirs(clips_dir, exist_ok=True)
+    clip_path = os.path.join(clips_dir, filename)
+    with open(clip_path, "wb") as f:
+        f.write(file_bytes)
+    _generate_clip_sidecar(clip_path)
+    return clip_path
+
+
+def _generate_clip_sidecar(clip_path):
+    import numpy as np
+    base = os.path.splitext(clip_path)[0]
+    info_path = base + ".info.json"
+    thumb_path = base + ".thumb.jpg"
+    try:
+        clip = VideoFileClip(clip_path)
+        duration = clip.duration
+        w, h = clip.w, clip.h
+        t_sample = max(0.1, min(duration * 0.1, 3.0))
+        frame = clip.get_frame(t_sample)
+        clip.close()
+        pil = Image.fromarray(frame.astype("uint8"))
+        pil.thumbnail((320, 568), Image.Resampling.LANCZOS)
+        pil.save(thumb_path, "JPEG", quality=80)
+        with open(info_path, "w", encoding="utf-8") as f:
+            json.dump({"duration": round(duration, 2), "width": w, "height": h}, f)
+    except Exception as e:
+        print(f"Erro ao gerar sidecar para {clip_path}: {e}")
+
+
+def get_clip_info(project_name, filename):
+    clips_dir = get_clips_dir(project_name)
+    base = os.path.splitext(filename)[0]
+    info_path = os.path.join(clips_dir, base + ".info.json")
+    thumb_path = os.path.join(clips_dir, base + ".thumb.jpg")
+    info = {}
+    if os.path.exists(info_path):
+        try:
+            with open(info_path, "r", encoding="utf-8") as f:
+                info = json.load(f)
+        except Exception:
+            pass
+    info["thumbnail"] = None
+    if os.path.exists(thumb_path):
+        with open(thumb_path, "rb") as f:
+            info["thumbnail"] = f.read()
+    return info
+
+
+def list_project_clips(project_name):
+    clips_dir = get_clips_dir(project_name)
+    if not os.path.exists(clips_dir):
+        return []
+    video_exts = {".mp4", ".mov", ".webm", ".avi", ".mkv", ".m4v"}
+    return sorted([
+        f for f in os.listdir(clips_dir)
+        if os.path.splitext(f.lower())[1] in video_exts
+        and os.path.isfile(os.path.join(clips_dir, f))
+    ])
+
+
+def delete_video_clip(project_name, filename):
+    clips_dir = get_clips_dir(project_name)
+    base = os.path.splitext(filename)[0]
+    ext = os.path.splitext(filename)[1]
+    deleted = False
+    for suffix in [ext, ".info.json", ".thumb.jpg"]:
+        p = os.path.join(clips_dir, base + suffix)
+        if os.path.exists(p):
+            os.remove(p)
+            deleted = True
+    return deleted
+
+
+def _make_caption_overlay_rgba(caption_text, width, height, font_size=42):
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    if not caption_text.strip():
+        return overlay
+    draw = ImageDraw.Draw(overlay)
+    font = get_caption_font(font_size)
+    box_w = width - 120
+    box_padding = 28
+    lines = wrap_text(caption_text, font, box_w - 2 * box_padding, draw)
+    if not lines:
+        return overlay
+    lh = draw.textbbox((0, 0), lines[0], font=font)
+    line_h = lh[3] - lh[1]
+    ls = 10
+    box_h = len(lines) * line_h + (len(lines) - 1) * ls + 2 * box_padding
+    bx, by = 60, height - box_h - 120
+    draw.rounded_rectangle([bx, by, bx + box_w, by + box_h], radius=12, fill=(0, 0, 0, 178))
+    cy = by + box_padding
+    for line in lines:
+        lb = draw.textbbox((0, 0), line, font=font)
+        lw = lb[2] - lb[0]
+        draw.text((bx + (box_w - lw) // 2, cy), line, font=font, fill="white")
+        cy += line_h + ls
+    return overlay
+
+
+def assemble_clips(project_name, ordered_clips, clip_configs,
+                   bg_music_name="Sem Música", bg_volume=0.15,
+                   output_size=(1080, 1920), transition="Corte Seco",
+                   transition_duration=0.5):
+    import numpy as np
+    ensure_default_bg_music()
+    clips_dir = get_clips_dir(project_name)
+    dest_dir = save_assets_dir(project_name)
+    tw, th = output_size
+    raw_clips = []
+    scene_clips = []
+
+    for filename in ordered_clips:
+        clip_path = os.path.join(clips_dir, filename)
+        if not os.path.exists(clip_path):
+            print(f"Clipe não encontrado: {clip_path}")
+            continue
+        cfg = clip_configs.get(filename, {})
+        start_t = float(cfg.get("start", 0.0))
+        end_t = cfg.get("end", None)
+        vol = float(cfg.get("volume", 1.0))
+        caption = cfg.get("caption", "")
+        try:
+            raw = VideoFileClip(clip_path)
+            raw_clips.append(raw)
+            t_end = min(float(end_t) if end_t is not None else raw.duration, raw.duration)
+            t_start = max(0.0, min(start_t, t_end - 0.1))
+            source = raw.subclipped(t_start, t_end)
+            dur = source.duration
+            audio = source.audio
+            if audio and vol != 1.0:
+                audio = audio.with_volume_scaled(vol)
+            cap_np = None
+            if caption.strip():
+                cap_np = np.array(_make_caption_overlay_rgba(caption, tw, th))
+            fade_d = min(transition_duration, dur / 4) if transition == "Fade to Black" else 0.0
+
+            def make_frame(t, _src=source, _tw=tw, _th=th, _cn=cap_np,
+                           _dur=dur, _fd=fade_d, _np=np):
+                frame = _src.get_frame(t)
+                pil = Image.fromarray(frame.astype("uint8"))
+                ow, oh = pil.size
+                if (ow, oh) != (_tw, _th):
+                    scale = max(_tw / ow, _th / oh)
+                    nw, nh = int(ow * scale + 0.5), int(oh * scale + 0.5)
+                    pil = pil.resize((nw, nh), Image.Resampling.LANCZOS)
+                    cx, cy = (nw - _tw) // 2, (nh - _th) // 2
+                    pil = pil.crop((cx, cy, cx + _tw, cy + _th))
+                if _cn is not None:
+                    rgb = _cn[:, :, :3].astype(float)
+                    a = _cn[:, :, 3:4].astype(float) / 255.0
+                    f = _np.array(pil).astype(float)
+                    pil = Image.fromarray((f * (1 - a) + rgb * a).astype("uint8"))
+                result = _np.array(pil)
+                if _fd > 0:
+                    alpha = min(1.0, max(0.0,
+                        t / _fd if t < _fd
+                        else (_dur - t) / _fd if t > _dur - _fd
+                        else 1.0))
+                    if alpha < 1.0:
+                        result = (result * alpha).astype("uint8")
+                return result
+
+            processed = VideoClip(make_frame, duration=dur)
+            processed.audio = audio
+            scene_clips.append(processed)
+        except Exception as e:
+            print(f"Erro ao processar '{filename}': {e}")
+            import traceback
+            traceback.print_exc()
+
+    if not scene_clips:
+        return None
+
+    try:
+        final_clip = concatenate_videoclips(scene_clips, method="compose")
+        if bg_music_name != "Sem Música":
+            bg_dir = os.path.join("assets", "bg_music")
+            bg_path = None
+            if bg_music_name == "Aleatória":
+                if os.path.exists(bg_dir):
+                    mp3s = [f for f in os.listdir(bg_dir) if f.endswith(".mp3")]
+                    if mp3s:
+                        import random
+                        bg_path = os.path.join(bg_dir, random.choice(mp3s))
+            else:
+                bg_path = os.path.join(bg_dir, bg_music_name)
+            if bg_path and os.path.exists(bg_path):
+                try:
+                    from moviepy import CompositeAudioClip
+                    bg_aud = AudioFileClip(bg_path)
+                    total_dur = final_clip.duration
+                    if bg_aud.duration < total_dur:
+                        n = int(total_dur / bg_aud.duration) + 1
+                        bg_aud = concatenate_audioclips([bg_aud] * n).subclipped(0, total_dur)
+                    else:
+                        bg_aud = bg_aud.subclipped(0, total_dur)
+                    bg_aud = bg_aud.with_volume_scaled(bg_volume)
+                    orig_audio = final_clip.audio
+                    if orig_audio:
+                        final_clip = final_clip.with_audio(CompositeAudioClip([orig_audio, bg_aud]))
+                    else:
+                        final_clip = final_clip.with_audio(bg_aud)
+                except Exception as e:
+                    print(f"Erro ao adicionar BGM: {e}")
+        output_path = os.path.join(dest_dir, "video_final.mp4")
+        final_clip.write_videofile(
+            output_path, fps=30, codec="libx264",
+            audio_codec="aac",
+            temp_audiofile=os.path.join(dest_dir, "temp_audio_clips.m4a"),
+            remove_temp=True,
+        )
+        for c in scene_clips:
+            try:
+                c.close()
+            except Exception:
+                pass
+        for r in raw_clips:
+            try:
+                r.close()
+            except Exception:
+                pass
+        final_clip.close()
+        return output_path
+    except Exception as e:
+        print(f"Erro na montagem final: {e}")
+        import traceback
+        traceback.print_exc()
+        return None

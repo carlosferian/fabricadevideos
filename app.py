@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 import json
-from utils import extract_text_from_pdf, generate_script, save_assets_dir, get_bgg_game_images, download_image, run_generate_audio, search_images_web, render_video, save_script_to_file, load_script_from_file, extract_images_from_url, delete_project_assets, generate_social_metadata, create_scene_frame, CONTENT_TYPES, DEPTH_LEVELS
+from utils import extract_text_from_pdf, generate_script, save_assets_dir, get_bgg_game_images, download_image, run_generate_audio, search_images_web, render_video, save_script_to_file, load_script_from_file, extract_images_from_url, delete_project_assets, generate_social_metadata, create_scene_frame, CONTENT_TYPES, DEPTH_LEVELS, get_clips_dir, save_video_clip, get_clip_info, list_project_clips, delete_video_clip, assemble_clips
 from streamlit_option_menu import option_menu
 import streamlit_antd_components as sac
 
@@ -325,8 +325,8 @@ st.markdown("</div>", unsafe_allow_html=True)
 # Elegant Horizontal Navigation Menu
 selected = option_menu(
     menu_title=None,
-    options=["Roteiro", "Narração & Imagens", "Animação & Vídeo", "Metadados Sociais"],
-    icons=["pencil-square", "mic", "play-btn", "rocket-takeoff"],
+    options=["Roteiro", "Narração & Imagens", "Animação & Vídeo", "Clipes", "Metadados Sociais"],
+    icons=["pencil-square", "mic", "play-btn", "film", "rocket-takeoff"],
     menu_icon="cast",
     default_index=0,
     orientation="horizontal",
@@ -364,14 +364,17 @@ elif selected == "Narração & Imagens":
     step_idx = 1
 elif selected == "Animação & Vídeo":
     step_idx = 2
-elif selected == "Metadados Sociais":
+elif selected == "Clipes":
     step_idx = 3
+elif selected == "Metadados Sociais":
+    step_idx = 4
 
 sac.steps(
     items=[
         sac.StepsItem(title='Roteiro', subtitle='Upload & Edição'),
         sac.StepsItem(title='Ativos', subtitle='Locução & Imagem'),
         sac.StepsItem(title='Renderização', subtitle='Efeitos & Vídeo'),
+        sac.StepsItem(title='Clipes', subtitle='Montagem Livre'),
         sac.StepsItem(title='Distribuição', subtitle='Copies Redes'),
     ],
     index=step_idx,
@@ -1041,7 +1044,190 @@ elif selected == "Animação & Vídeo":
                         use_container_width=True
                     )
 
-# --- TAB 4: METADADOS SOCIAIS (COPYWRITER) ---
+# --- TAB 4: CLIPES (MONTAGEM LIVRE) ---
+elif selected == "Clipes":
+    st.header("4. 🎞️ Montagem de Clipes")
+    st.markdown("Arraste e solte clipes de vídeo para montar uma edição personalizada, sem depender do roteiro gerado.")
+
+    if not project_name:
+        st.warning("⚠️ Defina o nome do projeto na barra lateral antes de continuar.")
+    else:
+        # ── Upload de clipes ──────────────────────────────────────────────
+        st.subheader("📁 Biblioteca de Clipes")
+        uploaded_clips = st.file_uploader(
+            "Envie um ou mais clipes de vídeo",
+            type=["mp4", "mov", "webm", "avi", "mkv", "m4v"],
+            accept_multiple_files=True,
+            key="clip_uploader",
+        )
+        if uploaded_clips:
+            with st.spinner("Salvando e analisando clipes…"):
+                for uf in uploaded_clips:
+                    save_video_clip(uf.read(), uf.name, project_name)
+            st.success(f"✅ {len(uploaded_clips)} clipe(s) adicionado(s) à biblioteca.")
+            st.rerun()
+
+        clips_on_disk = list_project_clips(project_name)
+
+        if not clips_on_disk:
+            st.info("Nenhum clipe na biblioteca. Envie arquivos acima para começar.")
+        else:
+            # ── Reordenação com drag-and-drop (ou fallback manual) ────────
+            try:
+                from streamlit_sortables import sort_items
+                if "clip_order" not in st.session_state or set(st.session_state.clip_order) != set(clips_on_disk):
+                    st.session_state.clip_order = clips_on_disk[:]
+                st.markdown("**Arraste os clipes para definir a ordem de montagem:**")
+                sorted_order = sort_items(st.session_state.clip_order, direction="vertical")
+                st.session_state.clip_order = sorted_order
+                ordered_clips = sorted_order
+            except ImportError:
+                st.info("💡 Instale `streamlit-sortables` para arrastar e soltar. Use os campos abaixo para ordenar manualmente.")
+                if "clip_order" not in st.session_state or set(st.session_state.clip_order) != set(clips_on_disk):
+                    st.session_state.clip_order = clips_on_disk[:]
+                ordered_clips = st.session_state.clip_order[:]
+
+            # ── Grade de thumbnails ───────────────────────────────────────
+            st.markdown("---")
+            st.markdown("**Clipes na biblioteca:**")
+            grid_cols = st.columns(min(len(clips_on_disk), 4))
+            for ci, fname in enumerate(clips_on_disk):
+                info = get_clip_info(project_name, fname)
+                with grid_cols[ci % 4]:
+                    if info.get("thumbnail"):
+                        st.image(info["thumbnail"], use_container_width=True)
+                    else:
+                        st.markdown("🎬 *(sem preview)*")
+                    dur = info.get("duration", 0)
+                    st.caption(f"**{fname}**  \n⏱ {dur:.1f}s")
+                    if st.button("🗑️ Remover", key=f"del_clip_{fname}"):
+                        delete_video_clip(project_name, fname)
+                        if fname in st.session_state.get("clip_order", []):
+                            st.session_state.clip_order.remove(fname)
+                        st.rerun()
+
+            # ── Configurações por clipe ───────────────────────────────────
+            st.markdown("---")
+            st.subheader("⚙️ Configurações por Clipe")
+            clip_configs = {}
+            for fname in ordered_clips:
+                info = get_clip_info(project_name, fname)
+                raw_dur = info.get("duration", 0)
+                with st.expander(f"🎬 {fname}  •  ⏱ {raw_dur:.1f}s", expanded=False):
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        start_t = st.number_input(
+                            "Início (s)", min_value=0.0,
+                            max_value=max(0.0, raw_dur - 0.1),
+                            value=0.0, step=0.1,
+                            key=f"clip_start_{fname}",
+                        )
+                    with c2:
+                        end_t = st.number_input(
+                            "Fim (s)", min_value=0.1,
+                            max_value=raw_dur if raw_dur > 0 else 999.0,
+                            value=raw_dur if raw_dur > 0 else 10.0, step=0.1,
+                            key=f"clip_end_{fname}",
+                        )
+                    with c3:
+                        vol = st.slider(
+                            "Volume do clipe", 0.0, 2.0, 1.0, 0.05,
+                            key=f"clip_vol_{fname}",
+                        )
+                    caption_text = st.text_input(
+                        "Legenda sobreposta (opcional)", value="",
+                        key=f"clip_caption_{fname}",
+                    )
+                    clip_configs[fname] = {
+                        "start": start_t,
+                        "end": end_t,
+                        "volume": vol,
+                        "caption": caption_text,
+                    }
+
+            # ── Configurações de saída ────────────────────────────────────
+            st.markdown("---")
+            st.subheader("🎛️ Configurações de Saída")
+            co1, co2, co3 = st.columns(3)
+            with co1:
+                fmt = st.selectbox(
+                    "Formato de Saída",
+                    ["Vertical 9:16 (TikTok/Reels)", "Horizontal 16:9 (YouTube)", "Quadrado 1:1 (Feed)"],
+                    index=0,
+                    key="clip_format",
+                )
+                fmt_map = {
+                    "Vertical 9:16 (TikTok/Reels)": (1080, 1920),
+                    "Horizontal 16:9 (YouTube)": (1920, 1080),
+                    "Quadrado 1:1 (Feed)": (1080, 1080),
+                }
+                output_size = fmt_map[fmt]
+            with co2:
+                transition = st.selectbox(
+                    "Transição entre Clipes",
+                    ["Corte Seco", "Fade to Black"],
+                    index=0,
+                    key="clip_transition",
+                )
+            with co3:
+                transition_dur = st.slider(
+                    "Duração da Transição (s)", 0.1, 1.5, 0.5, 0.1,
+                    key="clip_transition_dur",
+                    disabled=(transition == "Corte Seco"),
+                )
+
+            # BGM
+            bg_dir = os.path.join("assets", "bg_music")
+            music_options = ["Sem Música", "Aleatória"]
+            if os.path.exists(bg_dir):
+                music_options += sorted([f for f in os.listdir(bg_dir) if f.endswith(".mp3")])
+            cm1, cm2 = st.columns([2, 1])
+            with cm1:
+                bg_music_name = st.selectbox("🎵 Música de Fundo (BGM)", music_options, index=0, key="clip_bgm")
+            with cm2:
+                bg_vol = st.slider("Volume BGM", 0.0, 0.5, 0.15, 0.01, key="clip_bgm_vol",
+                                   disabled=(bg_music_name == "Sem Música"))
+
+            # Summary
+            total_dur = sum(
+                clip_configs.get(f, {}).get("end", get_clip_info(project_name, f).get("duration", 0)) -
+                clip_configs.get(f, {}).get("start", 0.0)
+                for f in ordered_clips
+            )
+            st.info(f"📊 **{len(ordered_clips)} clipe(s)** · ⏱ duração estimada: **{total_dur:.1f}s**")
+
+            st.markdown("---")
+            if st.button("🎬 Montar Vídeo Final", type="primary", use_container_width=True, key="btn_assemble"):
+                with st.spinner("Montando vídeo… isso pode levar alguns minutos dependendo do tamanho dos clipes."):
+                    result_path = assemble_clips(
+                        project_name=project_name,
+                        ordered_clips=ordered_clips,
+                        clip_configs=clip_configs,
+                        bg_music_name=bg_music_name,
+                        bg_volume=bg_vol,
+                        output_size=output_size,
+                        transition=transition,
+                        transition_duration=transition_dur,
+                    )
+                if result_path and os.path.exists(result_path):
+                    st.success("✅ Vídeo montado com sucesso!")
+                    st.session_state["clip_result_path"] = result_path
+                else:
+                    st.error("❌ Falha na montagem. Verifique o console para detalhes.")
+
+            if st.session_state.get("clip_result_path") and os.path.exists(st.session_state["clip_result_path"]):
+                result_path = st.session_state["clip_result_path"]
+                st.video(result_path)
+                with open(result_path, "rb") as f:
+                    st.download_button(
+                        label="⬇️ Baixar Vídeo Montado (MP4)",
+                        data=f,
+                        file_name=f"{project_name.lower().replace(' ', '_')}_montagem.mp4",
+                        mime="video/mp4",
+                        use_container_width=True,
+                    )
+
+# --- TAB 5: METADADOS SOCIAIS (COPYWRITER) ---
 elif selected == "Metadados Sociais":
     st.header("4. Metadados Sociais (Copywriter IA)")
     
