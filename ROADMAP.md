@@ -2,72 +2,56 @@
 
 Este documento serve como guia cronológico e lógico para a evolução contínua da **Fábrica Autônoma de Vídeos**. Ele detalha os próximos passos organizados por fases de desenvolvimento, priorizando valor visual imediato e estabilidade técnica antes de custos adicionais de APIs externas.
 
----
-
-## 🎨 Fase 1: Quick Wins Visuais & Sonoros (Custo: R$ 0)
-*Melhorias de alta percepção de valor com baixo esforço usando a infraestrutura local atual.*
-
-### 1.1 🎙️ Música de Fundo (BGM) Dinâmica
-* **Objetivo:** Adicionar trilha sonora de fundo nos vídeos de forma automática.
-* **Componentes:**
-  * Criação da pasta `assets/bg_music/` contendo arquivos `.mp3` livres de direitos autorais.
-  * Adicionar um controle no Streamlit (Sidebar ou Aba 3) para selecionar a trilha sonora ou modo "Aleatório".
-  * Integração no backend (`utils.py`) com `moviepy` para mesclar o áudio da música de fundo com a narração das cenas.
-  * Ajuste automático de volume: a música deve ser atenuada (ex: -18dB) para não abafar a narração.
-
-### 1.2 🖼️ Templates Visuais e Estilos de Renderização
-* **Objetivo:** Oferecer layouts alternativos de vídeo para diversificação de canais.
-* **Componentes:**
-  * **Estilo Clássico (Atual):** Imagem centralizada com borda branca fina de 4px e fundo desfocado (Gaussian Blur 30px).
-  * **Estilo Moderno (Gradiente Dinâmico):** Imagem com cantos arredondados e sombra projetada suave (*drop shadow*), posicionada sobre um fundo de gradiente linear/radial vibrante gerado automaticamente a partir das cores predominantes da imagem original do jogo (usando análise de paleta do Pillow).
-  * **Estilo Neon/Tech:** Borda neon colorida brilhante ao redor do componente, com legendas em caixas de texto com cantos arredondados translúcidos.
+> Para o histórico detalhado de tudo o que já foi entregue, veja o [HANDOFF.md](HANDOFF.md).
 
 ---
 
-## ⚙️ Fase 2: Performance & Experiência de Usuário (UX)
-*Melhoria no desempenho, velocidade de renderização e precisão técnica das ferramentas.*
+## ✅ Fases Concluídas
 
-### 2.1 ⚡ Paralelização do Processamento de TTS
-* **Objetivo:** Tornar a geração das locuções instantânea.
-* **Componentes:**
-  * Substituir o loop sequencial na geração das cenas na Aba 2 por processamento assíncrono paralelo com `asyncio.gather`.
-  * Geração paralela de todos os arquivos `scene_X.mp3` em segundos.
+### Fase 0: Sistema Agnóstico de Tema
+* Presets de **Tipo de Conteúdo** (Jogos de Tabuleiro & Cartas, Educacional & Curiosidades, Tutorial & Passo a Passo, Resenha & Reviews, Histórias & Narrativas, Listas & Rankings, Customizado/Geral) e **Profundidade do Roteiro** (Resumido, Detalhado, Aprofundado).
+* Upload de PDF e contexto em texto livre se tornaram opcionais — a IA pode gerar o roteiro apenas a partir do nome do projeto.
+* Busca de imagens generalizada (`search_images_web`) com filtros opcionais de palavras-chave para priorizar/evitar, substituindo as heurísticas exclusivas de jogos de tabuleiro.
+* Aba "Board Game Geek (BGG)" agora é condicional, exibida apenas para o tipo de conteúdo "Jogos de Tabuleiro & Cartas".
+* Correção da fonte das legendas (download automático de `Poppins-Bold.ttf`) para garantir qualidade visual consistente em qualquer sistema operacional.
+* Nomenclatura generalizada de `game`/`jogo` para `project`/`projeto` em toda a interface e no backend.
 
-### 2.2 📸 Motor de Imagens Ampliado
-* **Objetivo:** Melhorar a descoberta de componentes do jogo sem sair do app.
-* **Componentes:**
-  * Adicionar scraper para extrair fotos da galeria oficial do BoardGameGeek (BGG).
-  * Melhorar o ranking heurístico do DuckDuckGo para encontrar imagens de alta definição.
+### Fase 1: Quick Wins Visuais & Sonoros (Custo: R$ 0)
+* **1.1 Música de Fundo (BGM) Dinâmica:** Pasta `assets/bg_music/` com trilhas livres de direitos, controle de seleção/volume na Aba 3 e mixagem via `moviepy`.
+* **1.2 Templates Visuais:** Três estilos de renderização disponíveis (Clássico, Gradiente Moderno e Neon Dark), com gradiente de fundo gerado a partir da paleta de cores da imagem principal.
+
+### Fase 2: Performance & Experiência de Usuário (UX)
+* **2.1 Paralelização de TTS:** Geração de todos os `scene_X.mp3` em paralelo via `ThreadPoolExecutor`/`asyncio.gather`.
+* **2.2 Vozes Premium (ElevenLabs):** Integração opcional com vozes ultra-realistas, com seleção de voz e chave de API configurável.
+
+### Fase 3: Metadados Automatizados para Redes Sociais
+* O LLM gera automaticamente títulos, legendas (TikTok/Reels) e hashtags com base no roteiro e no Tipo de Conteúdo selecionado (Aba 4), persistidos em `metadata.json`/`metadata.txt`.
 
 ---
 
-## 🤖 Fase 3: IA Avançada & Animações Premium
+## 🚀 Próximas Fases
+
+## 🤖 Fase 4: IA Avançada & Animações Premium
 *Adoção de inteligência artificial generativa de ponta (introduz custos adicionais por chamada de API).*
 
-### 3.1 🎬 Image-to-Video (Animação 3D de Componentes)
-* **Objetivo:** Dar movimento tridimensional aos componentes estáticos do jogo.
+### 4.1 🎬 Image-to-Video (Animação 3D de Cenas)
+* **Objetivo:** Dar movimento tridimensional às imagens estáticas de qualquer cena do vídeo.
 * **Componentes:**
-  * Integração com APIs externas de geração de vídeo por IA (Runway Gen-2/Gen-3, Luma Dream Machine ou Kling via OpenRouter/APIs).
-  * O pipeline gerará um clipe de 3 a 5 segundos animando a imagem do componente original (mantendo a fidelidade) para ser usado como base da cena de vídeo, substituindo o frame estático.
-
-### 3.2 🎙️ Vozes Ultra-Realistas (ElevenLabs)
-* **Objetivo:** Locuções premium com entonação e tom interpretativo impecável.
-* **Componentes:**
-  * Integração opcional com a API do ElevenLabs.
-  * Suporte para escolha de vozes com sotaque brasileiro extremamente naturais.
+  * Integração com APIs externas de geração de vídeo por IA (Runway Gen-2/Gen-3, Luma Dream Machine ou Kling).
+  * O pipeline gerará um clipe de 3 a 5 segundos animando a imagem original da cena (mantendo a fidelidade) para ser usado como base, substituindo o frame estático.
 
 ---
 
-## 🚀 Fase 4: Automação e Distribuição (Escala Industrial)
-*Transformar a aplicação em um publicador automático ponta a ponta.*
+## 📅 Fase 5: Automação e Distribuição (Escala Industrial)
+*Transformar a aplicação em um publicador automático ponta a ponta, para vídeos de qualquer nicho.*
 
-### 4.1 📝 Metadados Automatizados para Redes Sociais
-* **Objetivo:** Gerar copys de postagem otimizadas para SEO e engajamento.
-* **Componentes:**
-  * O LLM gerará automaticamente o Título, Legenda e hashtags (TikTok, Reels, Shorts) baseados no roteiro criado na Aba 1.
-  * Geração do arquivo `metadata.txt` na pasta de assets do jogo.
-
-### 4.2 📅 Agendamento e Postagem Direta
+### 5.1 📅 Agendamento e Postagem Direta
 * **Objetivo:** Publicar os vídeos direto nas redes sociais pelo Streamlit.
 * **Componentes:**
   * Integração com as APIs oficiais do TikTok Business, Instagram Graph API e YouTube Data API para agendamento automático.
+
+### 5.2 📸 Motor de Imagens Ampliado
+* **Objetivo:** Melhorar a descoberta de imagens de alta definição sem sair do app, para qualquer tema.
+* **Componentes:**
+  * Adicionar provedores de busca de imagens adicionais (ex: bancos de imagens livres de direitos).
+  * Melhorar o ranking heurístico de `search_images_web` com aprendizado a partir dos filtros usados pelo usuário.

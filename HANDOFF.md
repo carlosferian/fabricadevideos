@@ -1,12 +1,13 @@
-# 📑 Documento de Handoff - Fábrica Autônoma de Vídeos Didáticos
+# 📑 Documento de Handoff - Fábrica Autônoma de Vídeos
 
 ## 🎯 Conceito Geral
-O projeto visa automatizar a criação de vídeos curtos verticais (9:16) para redes sociais (TikTok/Reels/Shorts) focados no ensino de jogos de tabuleiro e cartas.
+O projeto visa automatizar a criação de vídeos curtos verticais (9:16) para redes sociais (TikTok/Reels/Shorts) sobre **qualquer tema** — jogos de tabuleiro, receitas, curiosidades, tutoriais, reviews, histórias, rankings, etc. O pipeline é agnóstico de nicho: o tom, a persona e o nível de profundidade do roteiro são definidos por presets configuráveis na barra lateral.
 
 ### 💡 Regras de Ouro:
-1. **Fidelidade Visual:** Uso de imagens REAIS (BGG ou upload), evitando alucinações de IA em componentes.
-2. **Baixo Custo:** Prioridade para ferramentas gratuitas (edge-tts para narração, Gemini Flash para roteiro, SoundHelix para BGM).
+1. **Fidelidade Visual:** Uso de imagens REAIS (busca web, scraper de URL, BGG para jogos, ou upload), evitando alucinações de IA em componentes.
+2. **Baixo Custo:** Prioridade para ferramentas gratuitas (edge-tts para narração, OpenRouter para roteiro, SoundHelix para BGM).
 3. **Controle Humano:** Pipeline em abas (Streamlit) onde o usuário revisa e aprova cada etapa.
+4. **Agnosticismo de Tema:** Nenhuma etapa do pipeline assume que o conteúdo é sobre jogos. Materiais de referência (PDF/contexto) são opcionais — sem eles, a IA usa seu próprio conhecimento sobre o tema informado.
 
 ---
 
@@ -60,8 +61,8 @@ O projeto visa automatizar a criação de vídeos curtos verticais (9:16) para r
 ### ✅ Fase 5 (Imagens e Animações Contextuais Semânticas por IA & Revitalização UX - Concluída Hoje)
 - **5.1 Imagens Reais por Cena (Coerência Visual):**
   * O renderizador agora carrega imagens específicas por cena (`scene_1.jpg`, `scene_2.jpg`) correspondentes ao roteiro falado.
-  * **Fallback Seguro:** Caso a cena não tenha imagem individual, o sistema usa a imagem principal `main_game.jpg` como fallback, mantendo 100% de estabilidade.
-  * **Seletor de Download & Auto-Completar:** Adicionado dropdown de destino de download na Aba 2, atualizando automaticamente a pesquisa do DuckDuckGo com o visual exato da cena.
+  * **Fallback Seguro:** Caso a cena não tenha imagem individual, o sistema usa a imagem principal `main_image.jpg` como fallback, mantendo 100% de estabilidade.
+  * **Seletor de Download & Auto-Completar:** Adicionado dropdown de destino de download na Aba 2, atualizando automaticamente a pesquisa de imagens com o visual exato da cena.
 - **5.2 Animações Contextuais Semânticas:**
   * O prompt do OpenRouter exige o campo `'animation'` no JSON do roteiro.
   * A IA analisa a locução e seleciona o movimento de câmera perfeito (`Zoom In`, `Zoom Out`, `Pan` ou `Estática`).
@@ -70,6 +71,35 @@ O projeto visa automatizar a criação de vídeos curtos verticais (9:16) para r
   * Substituição de abas por **`streamlit-option-menu`** horizontal e régua de pipeline **`sac.steps`**.
   * Tema Dark Neon premium (fontes `Outfit`/`Inter` do Google Fonts, cartões glassmorphic, micro-animações de zoom nas imagens).
   * Correção de responsividade física contra corte de botões e inputs de texto (`white-space: normal`, ajuste de padding de containers).
+
+### ✅ Fase 6 (Refatoração Agnóstica de Tema & Correções de Qualidade - Concluída Hoje)
+- **6.1 Presets de Tipo de Conteúdo & Profundidade:**
+  * Nova seção "🎯 Estilo do Roteiro" na barra lateral com `Tipo de Conteúdo` (7 presets: Jogos de Tabuleiro & Cartas, Educacional & Curiosidades, Tutorial & Passo a Passo, Resenha & Reviews, Histórias & Narrativas, Listas & Rankings, Customizado/Geral) e `Profundidade do Roteiro` (Resumido, Detalhado, Aprofundado).
+  * Cada preset injeta uma persona, tom e dica visual diferentes no prompt do OpenRouter, mantendo o mesmo esquema JSON (`scene`/`narration`/`visual`/`animation`).
+- **6.2 Material de Referência Opcional:**
+  * O upload de PDF deixou de ser obrigatório. Adicionado campo de texto livre "Tópico / Contexto adicional" na barra lateral.
+  * Se nenhum PDF ou contexto for informado, a IA usa seu próprio conhecimento sobre o tema para gerar o roteiro.
+- **6.3 Busca de Imagens Genérica:**
+  * `search_game_images_ddg` foi substituída por `search_images_web`, removendo toda a heurística específica de jogos de tabuleiro (termos de boardgame, lista de bancos/Banco Imobiliário).
+  * Novo sistema de filtros avançados opcionais (palavras-chave para priorizar/evitar) configurável pelo usuário na Aba 2, aplicável a qualquer nicho.
+  * A aba "Board Game Geek (BGG)" só aparece quando o `Tipo de Conteúdo` selecionado é "Jogos de Tabuleiro & Cartas".
+- **6.4 Correção de Fonte das Legendas (Bug de Qualidade):**
+  * O carregamento de fonte das legendas dependia de fontes exclusivas do Windows (`arial.ttf`, `calibri.ttf`, `segoeui.ttf`) e caía silenciosamente na fonte bitmap minúscula padrão do Pillow em outros sistemas, degradando a qualidade visual das legendas.
+  * Novo helper `get_caption_font()` baixa e usa `Poppins-Bold.ttf` (Google Fonts) automaticamente, com fallback para fontes DejaVu/Windows antes do último recurso.
+- **6.5 Generalização de Nomenclatura:**
+  * Renomeação completa de `game_name`/`game_assets`/`main_game.jpg` para `project_name`/`project_assets`/`main_image.jpg` em todo o backend e frontend.
+  * Textos da interface trocados de "jogo"/"Jogo" para "projeto"/"Projeto" (campo "Nome do Projeto / Vídeo", "Restaurar Projeto Existente", limpeza de ativos, etc.).
+  * `generate_social_metadata` agora recebe o `content_type` selecionado para gerar hashtags e copies adequadas a qualquer nicho (não apenas jogos).
+
+### ✅ Fase 7 (UX de Edição de Vídeo - Concluída Hoje)
+- **7.1 Gerenciamento de Cenas no Roteiro Editável (Aba 1):**
+  * Cada cena agora tem botões ⬆️/⬇️ para reordenar e 🗑️ para remover, além de "➕ Adicionar Cena" para inserir uma nova cena vazia ao final do roteiro.
+  * Removida uma cena, os arquivos `scene_N.mp3`/`scene_N.jpg` dela permanecem no disco e são reaproveitados se uma cena com o mesmo número for adicionada novamente.
+  * Indicador "📊 N cena(s) · ⏱️ duração estimada da narração" calculado a partir da contagem de palavras (~150 palavras/min).
+  * Corrigido bug latente de estado de widgets: regenerar o roteiro (ou trocar de projeto) com o mesmo número de cenas não atualizava os campos de edição, pois o Streamlit reaproveitava valores antigos em `session_state` pelas mesmas chaves. Agora as chaves dos widgets incluem um contador `script_version`, incrementado sempre que o roteiro é (re)carregado por completo.
+- **7.2 Pré-visualização de Estilo na Renderização (Aba 3):**
+  * Substituído o painel não-funcional "Animação 3D Generativa (Kling/Luma)" — que apenas simulava uma chamada de API sem nenhum efeito real — por "👁️ Pré-visualização do Estilo", que gera instantaneamente o frame de qualquer cena com o estilo visual, imagem e legenda escolhidos via `create_scene_frame`, sem precisar renderizar o vídeo completo.
+  * A seção de Configurações de Renderização (estilo visual, animação, BGM) foi movida para antes da prévia, para que o estilo selecionado seja usado imediatamente na geração do frame de exemplo.
 
 ---
 
@@ -85,4 +115,4 @@ O projeto visa automatizar a criação de vídeos curtos verticais (9:16) para r
 
 ---
 
-**Nota de Sucesso Atual:** O pipeline de criação de vídeos coerentes por cena com locuções inteligentes (ElevenLabs/Edge-TTS) e animações semânticas contextuais a custo zero de API está 100% consolidado, com layout SaaS responsivo reestruturado e pronto para os novos passos de postagem automatizada e IA 3D!
+**Nota de Sucesso Atual:** O pipeline de criação de vídeos coerentes por cena com locuções inteligentes (ElevenLabs/Edge-TTS) e animações semânticas contextuais a custo zero de API está 100% consolidado, agora totalmente agnóstico de tema (jogos, receitas, curiosidades, tutoriais e qualquer outro nicho), com layout SaaS responsivo reestruturado e pronto para os novos passos de postagem automatizada e IA 3D!
